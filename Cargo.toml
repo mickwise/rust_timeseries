@@ -1,0 +1,17 @@
+[package]
+name = "rust_timeseries"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "rust_timeseries"
+crate-type = ["cdylib"]
+
+[dependencies]
+numpy = "0.25.0"
+pyo3 = {version = "0.25.1", features = ["extension-module"]}
+statrs = "0.18.0"
+
+[package.metadata.maturin]
+packages    = ["rust_timeseries"]
+module-name = "rust_timeseries"

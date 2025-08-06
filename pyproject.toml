@@ -1,0 +1,16 @@
+[build-system]
+requires = ["maturin>=1.9", "setuptools", "wheel"]
+build-backend = "maturin"
+
+[project]
+name = "rust_timeseries"
+version = "0.1.0"
+description = "Rust-implemented time-series utilities exposed to Python via PyO3."
+authors = [{ name = "Dor Fuchs" }]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+
+[tool.maturin]
+bindings = "pyo3"
+module-name = "rust_timeseries"

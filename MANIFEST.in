@@ -1,0 +1,2 @@
+include LICENSE README.md
+recursive-include rust_timeseries *.py *.pyi py.typed
