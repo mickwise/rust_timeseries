@@ -48,6 +48,6 @@ jobs:
         run: |
           python - <<'PY'
           import rust_timeseries
-          from rust_timeseries.statistical_tests import EscancianoLobato
+          from rust_timeseries import EscancianoLobato
           print("OK:", EscancianoLobato)
           PY
