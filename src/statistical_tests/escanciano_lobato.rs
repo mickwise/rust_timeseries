@@ -55,7 +55,11 @@ impl ELResult {
     /// assert!(1 <= result.p_tilde() && result.p_tilde() <= 4);
     /// println!("Q* = {:.3}, p-value = {:.3}", result.stat(), result.p_value());
     /// ```
-    pub fn escanciano_lobato(data: &[f64], q: f64, d: usize) -> Result<Self, stat_tests_errors::ELError> {
+    pub fn escanciano_lobato(
+        data: &[f64],
+        q: f64,
+        d: usize,
+    ) -> Result<Self, stat_tests_errors::ELError> {
         let n: f64 = data.len() as f64;
         let mean: f64 = calc_mean(data);
         let rho_tilde: Vec<f64> = calc_rho_tilde(data, d, mean)?;
@@ -142,7 +146,11 @@ fn calc_pi(p: usize, n: f64, q: f64, max_lag_abs: f64) -> f64 {
 /// Populate the vector {ρ̃ⱼ²}₍ⱼ₌₁₎ᵈ with  
 /// ρ̃ⱼ² = γ̂ⱼ² ⁄ τ̂ⱼ.
 #[inline]
-fn calc_rho_tilde(data: &[f64], d: usize, mean: f64) -> Result<Vec<f64>, stat_tests_errors::ELError> {
+fn calc_rho_tilde(
+    data: &[f64],
+    d: usize,
+    mean: f64,
+) -> Result<Vec<f64>, stat_tests_errors::ELError> {
     let mut rho_tilde = vec![0.0; d + 1];
     for j in 1..=d {
         let gamma_j = calc_gamma_j(data, j, mean);
