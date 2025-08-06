@@ -1,0 +1,13 @@
+# rust_timeseries/statistical_tests.pyi
+from typing import Any, Optional
+
+__all__ = ["EscancianoLobato"]
+
+class EscancianoLobato:
+    def __init__(self, raw_data: Any, q: float = 2.4, d: Optional[int] = ...) -> None: ...
+    @property
+    def statistic(self) -> float: ...
+    @property
+    def pvalue(self) -> float: ...
+    @property
+    def p_tilde(self) -> int: ...
