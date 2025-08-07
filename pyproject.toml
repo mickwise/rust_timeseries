@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "rust_timeseries"
-version = "0.1.0"
+version = "0.1.1"
 description = "Rust-implemented time-series utilities exposed to Python via PyO3."
 authors = [{ name = "Dor Fuchs" }]
 readme = "README.md"
