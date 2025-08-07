@@ -10,7 +10,7 @@
 //! ### Python quick-start
 //! ```python
 //! import rust_timeseries as rts
-//! test = rts.Tests.escanciano_lobato(data, q=5, d=10)
+//! test = rts.statistical_tests.EscancianoLobato(data, q=5, d=10)
 //! test.statistic, test.pvalue
 //! ```
 //! See each function’s docstring for details.
@@ -35,12 +35,13 @@ use crate::{statistical_tests::escanciano_lobato::ELResult, utils::extract_f64_a
 use numpy::PyReadonlyArray1;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 /// Result of the Escanciano–Lobato heteroscedasticity proxy \(EL\) test.
 ///
 /// Returned by [`statistical_tests.escanciano_lobato`].  
 /// The statistic is asymptotically χ²(1) under the null.
-#[pyclass]
+#[pyclass(module = "rust_timeseries.statistical_tests")]
 pub struct EscancianoLobato {
     /// The EL test result struct.
     inner: ELResult,
@@ -138,11 +139,25 @@ impl EscancianoLobato {
 fn rust_timeseries<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
     statistical_tests(_py, m)?;
     Ok(())
-}
+}         // make sure this line is present
 
-fn statistical_tests<'py>(_py: Python, rust_timeseries: &Bound<'py, PyModule>) -> PyResult<()> {
-    let statistical_tests = PyModule::new(rust_timeseries.py(), "statistical_tests")?;
+fn statistical_tests<'py>(
+    _py: Python<'py>,
+    rust_timeseries: &Bound<'py, PyModule>,
+) -> PyResult<()> {
+    let statistical_tests =
+        PyModule::new(rust_timeseries.py(), "rust_timeseries.statistical_tests")?;
     statistical_tests.add_class::<EscancianoLobato>()?;
     rust_timeseries.add_submodule(&statistical_tests)?;
+
+    // ‼️  own the dict
+    let sys_modules: Bound<'py, PyDict> = rust_timeseries
+        .py()
+        .import("sys")?                // -> Bound<'py, PyModule>
+        .getattr("modules")?           // -> Bound<'py, PyAny>
+        .downcast_into::<PyDict>()?;   // -> Bound<'py, PyDict>
+
+    sys_modules.set_item("rust_timeseries.statistical_tests", &statistical_tests)?;
     Ok(())
 }
+
