@@ -6,8 +6,8 @@ on:
       - 'v*'
 
 permissions:
-  contents: read      # for checkout
-  id-token: write     # for OIDC if you switch from token
+  contents: read
+  id-token: write
 
 jobs:
   publish:
@@ -45,12 +45,9 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip wheel setuptools maturin
-          if [[ "${{ runner.os }}" == "macos-latest" ]]; then
-            maturin build --release --sdist --universal2
-          else
-            maturin build --release --sdist
-          fi
+          maturin build --release --sdist         # one line now
 
+      # Publish to PyPI
       - name: Publish to PyPI
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -60,4 +57,4 @@ jobs:
         run: |
           python -m pip install --upgrade twine
           twine upload --skip-existing target/wheels/*
-          twine upload --skip-existing target/sdist/*
+
