@@ -139,7 +139,7 @@ impl EscancianoLobato {
 fn rust_timeseries<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
     statistical_tests(_py, m)?;
     Ok(())
-}         // make sure this line is present
+}
 
 fn statistical_tests<'py>(
     _py: Python<'py>,
@@ -150,14 +150,12 @@ fn statistical_tests<'py>(
     statistical_tests.add_class::<EscancianoLobato>()?;
     rust_timeseries.add_submodule(&statistical_tests)?;
 
-    // ‼️  own the dict
     let sys_modules: Bound<'py, PyDict> = rust_timeseries
         .py()
-        .import("sys")?                // -> Bound<'py, PyModule>
-        .getattr("modules")?           // -> Bound<'py, PyAny>
-        .downcast_into::<PyDict>()?;   // -> Bound<'py, PyDict>
+        .import("sys")?
+        .getattr("modules")?
+        .downcast_into::<PyDict>()?;
 
     sys_modules.set_item("rust_timeseries.statistical_tests", &statistical_tests)?;
     Ok(())
 }
-
