@@ -13,4 +13,4 @@ requires-python = ">=3.9"
 
 [tool.maturin]
 bindings = "pyo3"
-module-name = "rust_timeseries"
+module-name = "rust_timeseries._rust_timeseries"

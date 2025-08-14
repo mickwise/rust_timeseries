@@ -135,7 +135,7 @@ impl EscancianoLobato {
 }
 
 #[pymodule]
-fn rust_timeseries<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
+fn _rust_timeseries<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
     let statistical_tests_mod = PyModule::new(_py, "statistical_tests")?;
     statistical_tests(_py, m, &statistical_tests_mod)?;
 
