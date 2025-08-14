@@ -146,7 +146,11 @@ fn _rust_timeseries<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult
     Ok(())
 }
 
-fn statistical_tests<'py>(_py: Python, rust_timeseries: &Bound<'py, PyModule>, m:&Bound<'py, PyModule>) -> PyResult<()> {
+fn statistical_tests<'py>(
+    _py: Python,
+    rust_timeseries: &Bound<'py, PyModule>,
+    m: &Bound<'py, PyModule>,
+) -> PyResult<()> {
     m.add_class::<EscancianoLobato>()?;
     rust_timeseries.add_submodule(m)?;
     Ok(())
