@@ -36,11 +36,31 @@ use numpy::PyReadonlyArray1;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-/// Result of the Escanciano–Lobato heteroscedasticity proxy \(EL\) test.
+/// Escanciano–Lobato heteroskedasticity proxy test.
 ///
-/// Returned by [`statistical_tests.escanciano_lobato`].  
+/// Parameters
+/// ----------
+/// raw_data : array-like of float64, shape *(n,)*
+///     Must not contain any NaN values.
+/// q : int, optional
+///     Order of the proxy.  `q > 0`.  Default = 2.4.
+/// d : int, optional
+///     Maximum lag.  Default = ⌊n^0.2⌋.
+///
+/// Raises
+/// ------
+/// PyValueError
+///    If `data` is empty, contains NaN values, or if `q` or `d` are not positive integers.
+///
+/// Returns
+/// -------
+/// EscancianoLobato
+///     Object with ``statistic``, ``pvalue`` and ``p_tilde`` attributes.
+///
+/// Notes
+/// -----
 /// The statistic is asymptotically χ²(1) under the null.
-#[pyclass]
+#[pyclass(module = "rust_timeseries.statistical_tests")]
 pub struct EscancianoLobato {
     /// The EL test result struct.
     inner: ELResult,
@@ -48,29 +68,9 @@ pub struct EscancianoLobato {
 
 #[pymethods]
 impl EscancianoLobato {
-    /// Escanciano–Lobato heteroskedasticity proxy test.
+    /// Result of the Escanciano–Lobato heteroscedasticity proxy \(EL\) test.
     ///
-    /// Parameters
-    /// ----------
-    /// raw_data : array-like of float64, shape *(n,)*
-    ///     Must not contain any NaN values.
-    /// q : int, optional
-    ///     Order of the proxy.  `q > 0`.  Default = 2.4.
-    /// d : int, optional
-    ///     Maximum lag.  Default = ⌊n^0.2⌋.
-    ///
-    /// Raises
-    /// ------
-    /// PyValueError
-    ///    If `data` is empty, contains NaN values, or if `q` or `d` are not positive integers.
-    ///
-    /// Returns
-    /// -------
-    /// EscancianoLobato
-    ///     Object with ``statistic``, ``pvalue`` and ``p_tilde`` attributes.
-    ///
-    /// Notes
-    /// -----
+    /// Returned by [`statistical_tests.escanciano_lobato`].  
     /// The statistic is asymptotically χ²(1) under the null.
     #[new]
     #[pyo3(
