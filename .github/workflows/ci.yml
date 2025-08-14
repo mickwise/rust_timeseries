@@ -49,15 +49,16 @@ jobs:
 
       - name: Smoke-test the Python API
         run: |
+          cd /tmp
           python - <<'PY'
           import rust_timeseries
-          print("OK:", rust_timeseries)
-
+          print("OK:", rust_timeseries, rust_timeseries.__file__)
+      
           from rust_timeseries.statistical_tests import EscancianoLobato
           print("Found:", EscancianoLobato)
-
+      
           import numpy as np
           data = np.random.randn(50)
           test = EscancianoLobato(data)
-          print("statistic:", test.statistic, "pvalue:", test.pvalue)
+          print("statistic:", test.statistic, "pvalue:", test.pvalue, "p_tilde:", test.p_tilde)
           PY
