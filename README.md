@@ -98,5 +98,5 @@ Escanciano, J. C. & Lobato, I. N. (2009). *Testing serial correlation in time se
 
 ## Examples
 - **EL test + GARCH (Intel 1973–2008)**  
-  Notebook: `examples/el_intc_1973_2008/chapter_3_exercise_5.ipynb`  
-  PDF: `examples/el_intc_1973_2008/chapter_3_exercise_5.pdf`
+  Notebook: `examples/el_intc_1973_2008/Escanciano-Lobato-example.ipynb`  
+  PDF: `examples/el_intc_1973_2008/Escanciano-Lobato-example.pdf`
