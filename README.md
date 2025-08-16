@@ -93,3 +93,10 @@ Released under the **MIT License** – free for commercial and academic use.
 Escanciano, J. C. & Lobato, I. N. (2009). *Testing serial correlation in time series with missing observations.* **Journal of Econometrics 150**, 209–225.
 
 [PyO3]: https://pyo3.rs
+
+---
+
+## Examples
+- **EL test + GARCH (Intel 1973–2008)**  
+  Notebook: `examples/el_intc_1973_2008/chapter_3_exercise_5.ipynb`  
+  PDF: `examples/el_intc_1973_2008/chapter_3_exercise_5.pdf`
