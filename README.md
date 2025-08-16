@@ -1,7 +1,6 @@
 # rust_timeseries
 
 [[PyPI version](https://img.shields.io/pypi/v/rust-timeseries.svg)](https://pypi.org/project/rust-timeseries/)
-[[Python versions](https://img.shields.io/pypi/pyversions/rust-timeseries.svg)](https://pypi.org/project/rust-timeseries/)
 [[License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [[CI](https://github.com/mickwise/rust_timeseries/actions/workflows/ci.yml/badge.svg)](https://github.com/mickwise/rust_timeseries/actions/workflows/ci.yml)
 
