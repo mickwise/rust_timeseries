@@ -1,7 +1,9 @@
 # rust_timeseries
 
-[PyPI](https://img.shields.io/pypi/v/rust_timeseries)
-[CI](https://github.com/your-org/rust_timeseries/actions/workflows/ci.yml/badge.svg)
+[[PyPI version](https://img.shields.io/pypi/v/rust-timeseries.svg)](https://pypi.org/project/rust-timeseries/)
+[[Python versions](https://img.shields.io/pypi/pyversions/rust-timeseries.svg)](https://pypi.org/project/rust-timeseries/)
+[[License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[[CI](https://github.com/mickwise/rust_timeseries/actions/workflows/ci.yml/badge.svg)](https://github.com/mickwise/rust_timeseries/actions/workflows/ci.yml)
 
 **rust_timeseries** is a high-performance **Python** library for time-series diagnostics.  
 The first release implements the Escanciano–Lobato (2009) robust automatic portmanteau test for serial dependence.  
