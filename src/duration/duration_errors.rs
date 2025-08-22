@@ -2,7 +2,7 @@
 //! recursion invariants, and optimizer failures).
 //!
 //! This module defines a single error type, [`ACDError`], used across the
-//! Python-facing API and the internal Rust core. 
+//! Python-facing API and the internal Rust core.
 //!
 //! ## Conventions
 //! - **Indices are 0-based** (match Rust/NumPy).
@@ -43,9 +43,8 @@ pub enum ACDError {
     T0OutOfRange { t0: usize, len: usize },
 
     // ---- Model innovations and shape ----
-
     /// Innovations with Weibull distribution must have finite and strictly positive parameters.
-    InvalidWeibullParam {param: f64, reason: &'static str },
+    InvalidWeibullParam { param: f64, reason: &'static str },
 
     ///Innovations for Weibull distribution must fulfill the unit mean condition.
     InvalidUnitMeanWeibull { mean: f64 },
@@ -57,14 +56,18 @@ pub enum ACDError {
     InvalidUnitMeanGenGamma { mean: f64 },
 
     /// At least one model shape parameter must be finite and > 0.
-    InvalidModelShape {param: f64},
+    InvalidModelShape { param: f64 },
 
     // ---- Meta / options validation ----
     /// epsilon_floor must be finite and > 0.
     InvalidEpsilonFloor { value: f64 },
 
     /// Psi guards must be finite with 0 < min < max.
-    InvalidPsiGuards { min: f64, max: f64, reason: &'static str },
+    InvalidPsiGuards {
+        min: f64,
+        max: f64,
+        reason: &'static str,
+    },
 
     /// Init::Fixed(v) must be finite and > 0.
     InvalidInitFixed { value: f64 },
@@ -89,7 +92,7 @@ impl std::fmt::Display for ACDError {
         match self {
             ACDError::EmptySeries => {
                 write!(f, "Input series is empty.")
-            },
+            }
             ACDError::NonFiniteData { index, value } => {
                 write!(f, "Data point at index {index} is non-finite: {value}")
             }
@@ -100,31 +103,52 @@ impl std::fmt::Display for ACDError {
                 write!(f, "Burn-in t0 ({t0}) exceeds series length ({len}).")
             }
             ACDError::InvalidWeibullParam { param, reason } => {
-                write!(f, "Weibull parameter must be finite and > 0; got: {param}. {reason}")
+                write!(
+                    f,
+                    "Weibull parameter must be finite and > 0; got: {param}. {reason}"
+                )
             }
             ACDError::InvalidGenGammaParam { param, reason } => {
-                write!(f, "Generalized Gamma parameter must be finite and > 0; got: {param}. {reason}")
+                write!(
+                    f,
+                    "Generalized Gamma parameter must be finite and > 0; got: {param}. {reason}"
+                )
             }
             ACDError::InvalidUnitMeanWeibull { mean } => {
-                write!(f, "Weibull parameters must fulfill unit mean condition: {mean}.")
+                write!(
+                    f,
+                    "Weibull parameters must fulfill unit mean condition: {mean}."
+                )
             }
-            ACDError::InvalidUnitMeanGenGamma {mean} => {
-                write!(f, "Generalized Gamma parameters must fulfill unit mean condition: {mean}.")
+            ACDError::InvalidUnitMeanGenGamma { mean } => {
+                write!(
+                    f,
+                    "Generalized Gamma parameters must fulfill unit mean condition: {mean}."
+                )
             }
             ACDError::InvalidModelShape { param } => {
-                write!(f, "At least one model shape parameter must be finite and > 0; got: {param}")
+                write!(
+                    f,
+                    "At least one model shape parameter must be finite and > 0; got: {param}"
+                )
             }
             ACDError::InvalidEpsilonFloor { value } => {
                 write!(f, "epsilon_floor must be finite and > 0; got: {value}")
             }
             ACDError::InvalidPsiGuards { min, max, reason } => {
-                write!(f, "Psi guards must be finite with 0 < min ({min}) < max ({max}); {reason}")
+                write!(
+                    f,
+                    "Psi guards must be finite with 0 < min ({min}) < max ({max}); {reason}"
+                )
             }
             ACDError::InvalidInitFixed { value } => {
                 write!(f, "Init::Fixed must be finite and > 0; got: {value}")
             }
             ACDError::NonFinitePsi { t, value } => {
-                write!(f, "Recursion produced non-finite psi_t at index {t}: {value}")
+                write!(
+                    f,
+                    "Recursion produced non-finite psi_t at index {t}: {value}"
+                )
             }
             ACDError::OptimizationFailed { status } => {
                 write!(f, "Optimizer failed with status: {status}")
@@ -158,9 +182,13 @@ impl std::fmt::Display for ParamError {
         match self {
             ParamError::StationarityViolated(err) => {
                 write!(f, "Model parameters violate stationarity: {}", err)
-            },
+            }
             ParamError::ThetaLengthMismatch { expected, actual } => {
-                write!(f, "Theta length mismatch: expected {}, got {}", expected, actual)
+                write!(
+                    f,
+                    "Theta length mismatch: expected {}, got {}",
+                    expected, actual
+                )
             }
         }
     }

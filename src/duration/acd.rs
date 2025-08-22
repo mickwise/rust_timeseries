@@ -27,8 +27,7 @@ pub enum ZeroPolicy {
     Error,
 }
 
-impl ZeroPolicy{
-    
+impl ZeroPolicy {
     // Return an error if encountering a zero during computations.
     pub const fn error() -> Self {
         ZeroPolicy::Error
@@ -44,7 +43,9 @@ impl ZeroPolicy{
     /// Returns [`ACDError::InvalidEpsilonFloor`] if `epsilon_floor` is not finite or nonpositive.
     pub fn clip_to_epsilon(epsilon_floor: f64) -> ACDResult<Self> {
         if !epsilon_floor.is_finite() || epsilon_floor <= 0.0 {
-            return Err(ACDError::InvalidEpsilonFloor { value: epsilon_floor });
+            return Err(ACDError::InvalidEpsilonFloor {
+                value: epsilon_floor,
+            });
         }
         Ok(ZeroPolicy::ClipToEpsilon(epsilon_floor))
     }
@@ -66,7 +67,6 @@ pub enum Init {
 }
 
 impl Init {
-
     /// Use the unconditional-mean initialization for ψ.
     ///
     /// This is typically a safe, fast default that avoids dependence on the
@@ -82,7 +82,7 @@ impl Init {
     pub const fn sample_mean() -> Self {
         Init::SampleMean
     }
- 
+
     /// Use a fixed value to initialize ψ.
     ///
     /// The value must be **finite and strictly positive**.
@@ -91,9 +91,9 @@ impl Init {
     /// Returns [`ACDError::InvalidInitFixed`] if `value` is not finite or `value <= 0.0`.
     pub fn fixed(value: f64) -> ACDResult<Self> {
         if !value.is_finite() || value <= 0.0 {
-            return Err(ACDError::InvalidInitFixed{value});
+            return Err(ACDError::InvalidInitFixed { value });
         }
-        Ok(Init::Fixed(value))   
+        Ok(Init::Fixed(value))
     }
 }
 
@@ -119,7 +119,7 @@ pub enum ACDInnovation {
 
     Weibull {
         lambda: f64, // scale parameter
-        k: f64, 
+        k: f64,
     },
 
     GeneralizedGamma {
@@ -130,7 +130,6 @@ pub enum ACDInnovation {
 }
 
 impl ACDInnovation {
-
     /// Exponential(1) innovations (unit mean).
     ///
     /// Returns the exponential distribution with rate = 1 (mean = 1),
@@ -154,11 +153,7 @@ impl ACDInnovation {
     pub fn weibull(k: f64) -> ACDResult<Self> {
         let k = verify_weibull_param(k)?;
         let lambda = (-gamma::ln_gamma(1.0 + 1.0 / k)).exp();
-        Ok(ACDInnovation::Weibull {
-            lambda,
-            k,
-        })
-
+        Ok(ACDInnovation::Weibull { lambda, k })
     }
 
     /// Weibull innovations with user-provided `lambda` and `k`, **validated** for unit mean.
@@ -181,15 +176,10 @@ impl ACDInnovation {
         let uncond_mean = lambda * gamma::ln_gamma(1.0 + 1.0 / k).exp();
         if (uncond_mean - 1.0).abs() > UNIT_MEAN_ATOL {
             return Err(ACDError::InvalidUnitMeanWeibull { mean: uncond_mean });
+        } else {
+            lambda = lambda / uncond_mean;
         }
-        else {
-            lambda = lambda / uncond_mean; 
-        }
-        Ok(ACDInnovation::Weibull {
-            lambda,
-            k,
-        })
-
+        Ok(ACDInnovation::Weibull { lambda, k })
     }
 
     /// Generalized-Gamma innovations with **unit mean**, given shapes `p` and `d`.
@@ -206,12 +196,8 @@ impl ACDInnovation {
     pub fn generalized_gamma(p: f64, d: f64) -> ACDResult<Self> {
         let p = verify_gamma_param(p)?;
         let d = verify_gamma_param(d)?;
-        let a = (gamma::ln_gamma(d/p) - gamma::ln_gamma((d + 1.0)/p)).exp(); 
-        Ok(ACDInnovation::GeneralizedGamma {
-            a,
-            d,
-            p,
-        })
+        let a = (gamma::ln_gamma(d / p) - gamma::ln_gamma((d + 1.0) / p)).exp();
+        Ok(ACDInnovation::GeneralizedGamma { a, d, p })
     }
 
     /// Generalized-Gamma innovations with user-provided `a, p, d`, **validated** for unit mean.
@@ -232,18 +218,13 @@ impl ACDInnovation {
         let mut a = verify_gamma_param(a)?;
         let p = verify_gamma_param(p)?;
         let d = verify_gamma_param(d)?;
-        let uncond_mean = (a.ln() + gamma::ln_gamma((d + 1.0)/p) - gamma::ln_gamma(d/p)).exp();
+        let uncond_mean = (a.ln() + gamma::ln_gamma((d + 1.0) / p) - gamma::ln_gamma(d / p)).exp();
         if (uncond_mean - 1.0).abs() > UNIT_MEAN_ATOL {
             return Err(ACDError::InvalidUnitMeanGenGamma { mean: uncond_mean });
-        }
-        else {
+        } else {
             a = a / uncond_mean;
         }
-        Ok(ACDInnovation::GeneralizedGamma {
-            a,
-            d,
-            p,
-        })
+        Ok(ACDInnovation::GeneralizedGamma { a, d, p })
     }
 }
 
@@ -260,7 +241,6 @@ pub struct ACDShape {
 }
 
 impl ACDShape {
-
     /// Construct an [`ACDShape`] = ACD(p, q).
     ///
     /// # Errors
@@ -284,8 +264,7 @@ pub struct PsiGuards {
     pub max: f64,
 }
 
-impl PsiGuards{
-
+impl PsiGuards {
     /// Construct new ψ bounds.
     ///
     /// # Errors
@@ -337,7 +316,6 @@ pub struct ACDData {
 }
 
 impl ACDData {
-
     /// Construct a validated [`ACDData`] instance.
     ///
     /// # Errors
@@ -359,10 +337,13 @@ impl ACDData {
                 return Err(ACDError::NonPositiveData { index, value });
             }
         }
-        
+
         if let Some(t0_val) = t0 {
             if t0_val >= data.len() {
-                return Err(ACDError::T0OutOfRange { t0: t0_val, len: data.len() });
+                return Err(ACDError::T0OutOfRange {
+                    t0: t0_val,
+                    len: data.len(),
+                });
             }
         }
 
@@ -386,7 +367,6 @@ pub struct ACDMeta {
 }
 
 impl ACDMeta {
-
     /// Construct a new [`ACDMeta`] instance.
     ///
     /// Does not currently validate options beyond their constructors; assumes
@@ -396,8 +376,7 @@ impl ACDMeta {
         zero_policy: ZeroPolicy,
         scale: Option<f64>,
         diurnal_adjusted: bool,
-    ) -> ACDMeta{
-
+    ) -> ACDMeta {
         ACDMeta {
             unit,
             zero_policy,
@@ -412,7 +391,7 @@ impl ACDMeta {
 /// Bundles initialization, numerical guards, randomization, and output
 /// preferences into a single struct.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ACDOptions{ 
+pub struct ACDOptions {
     pub init: Init,
     // pub optimizer: MleOptions,
     pub psi_guards: PsiGuards,
@@ -422,7 +401,6 @@ pub struct ACDOptions{
 }
 
 impl ACDOptions {
-
     /// Construct a new [`ACDOptions`] instance.
     ///
     /// Does not currently validate options beyond their constructors; assumes
@@ -462,7 +440,6 @@ pub struct ACDModelSpec {
 }
 
 impl ACDModelSpec {
-
     /// Construct an [`ACDModelSpec`] from its components.
     ///
     /// This function assumes each component has already been validated by its
@@ -475,12 +452,9 @@ impl ACDModelSpec {
             options,
         }
     }
-    
 }
 
-
 /// ---- Helper methods ----
-
 
 /// Validate a single Weibull parameter (scale or shape).
 ///
@@ -489,7 +463,7 @@ impl ACDModelSpec {
 /// # Errors
 /// Returns `InvalidWeibullParam` with a descriptive `reason` if the check fails.
 fn verify_weibull_param(param: f64) -> ACDResult<f64> {
-    if !param.is_finite(){
+    if !param.is_finite() {
         return Err(ACDError::InvalidWeibullParam {
             param,
             reason: "Weibull parameters must be finite.",

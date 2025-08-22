@@ -2,7 +2,6 @@ use ndarray::{Array1, s};
 
 use crate::duration::duration_errors::{ParamError, ParamResult};
 
-
 /// Consts
 const STATIONARITY_MARGIN: f64 = 1e-6; // Small value to ensure strict stationarity
 
@@ -51,7 +50,6 @@ pub struct ACDTheta {
 }
 
 impl ACDTheta {
-
     pub fn to_params(&self, p: usize, q: usize) -> ParamResult<ACDParams> {
         if self.theta.len() != p + q + 2 {
             return Err(ParamError::ThetaLengthMismatch {
@@ -62,10 +60,16 @@ impl ACDTheta {
 
         let omega = (1.0 + self.theta[0].exp()).ln();
         let coeffs = safe_softmax(&self.theta.slice(s![1..]).to_owned());
-        let slack = coeffs.last().unwrap()*(1.0 - STATIONARITY_MARGIN);
-        let alpha = coeffs.slice(s![0..p]).to_owned().mapv_into(|x| x * (1.0 - STATIONARITY_MARGIN));
-        let beta = coeffs.slice(s![p..p + q]).to_owned().mapv_into(|x| x * (1.0 - STATIONARITY_MARGIN));
-        
+        let slack = coeffs.last().unwrap() * (1.0 - STATIONARITY_MARGIN);
+        let alpha = coeffs
+            .slice(s![0..p])
+            .to_owned()
+            .mapv_into(|x| x * (1.0 - STATIONARITY_MARGIN));
+        let beta = coeffs
+            .slice(s![p..p + q])
+            .to_owned()
+            .mapv_into(|x| x * (1.0 - STATIONARITY_MARGIN));
+
         Ok(ACDParams {
             omega,
             alpha,
