@@ -8,6 +8,7 @@ name = "rust_timeseries"
 crate-type = ["cdylib"]
 
 [dependencies]
+ndarray = "0.16.1"
 numpy = "0.25.0"
 pyo3 = {version = "0.25.1", features = ["extension-module"]}
 statrs = "0.18.0"
