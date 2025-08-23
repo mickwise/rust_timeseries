@@ -51,23 +51,34 @@ impl ZeroPolicy {
     }
 }
 
-/// Initialization policy for the ACD ψ recursion.
+/// Initialization policy for the pre-sample state in ACD(p, q).
 ///
-/// Controls how the initial state (and/or initial guess) is set before
-/// maximizing the likelihood. The only variant that accepts a parameter is
-/// [`Init::Fixed`]; it must be **finite and strictly positive**.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// An ACD(p, q) recursion requires *q* past ψ values and *p* past
+/// duration values of duration lags. These policies specify how to fill those **missing lags**
+/// before the first observed sample.
+///
+/// ## Scalar policies (replicated to all needed lags)
+/// - `UncondMean`: use the model’s unconditional mean μ for both ψ and duration lags.
+/// - `SampleMean`: use the sample mean of the observed durations x̄ for both ψ and duration lags.
+/// - `Fixed(v)`: use a strictly positive scalar `v` for both ψ and duration lags.
+///
+/// ## Vector policy (explicit control)
+/// - `FixedVector { psi_lags, duration_lags }`: caller supplies exact pre-sample vectors:
+///     - `psi_lags`: length p, provides ψ_{-1}, …, ψ_{-p}
+///     - `duration_lags`  : length q, provides duration_{-1}, …, duration_{-q}
+#[derive(Debug, Clone, PartialEq)]
 pub enum Init {
-    /// Initialize ψ at the unconditional mean implied by the model.
     UncondMean,
-    /// Initialize ψ at the sample mean of the data.
     SampleMean,
-    /// Initialize ψ at a fixed value.
     Fixed(f64),
+    FixedVector {
+        psi_lags: Array1<f64>,
+        duration_lags: Array1<f64>,
+    },
 }
 
 impl Init {
-    /// Use the unconditional-mean initialization for ψ.
+    /// Use the unconditional-mean initialize all required ψ and duration lags.
     ///
     /// This is typically a safe, fast default that avoids dependence on the
     /// sample path in the first few iterations.
@@ -75,7 +86,7 @@ impl Init {
         Init::UncondMean
     }
 
-    /// Use the sample-mean initialization for ψ.
+    /// Use the sample-mean to initialize all required ψ and duration lags.
     ///
     /// Useful when you believe the estimation window is representative and want
     /// ψ₀ anchored to the data rather than the model-implied mean.
@@ -83,7 +94,7 @@ impl Init {
         Init::SampleMean
     }
 
-    /// Use a fixed value to initialize ψ.
+    /// Use a fixed value to initialize all required ψ and duration lags.
     ///
     /// The value must be **finite and strictly positive**.
     ///
@@ -94,6 +105,22 @@ impl Init {
             return Err(ACDError::InvalidInitFixed { value });
         }
         Ok(Init::Fixed(value))
+    }
+
+    /// Use a fixed vector of ψ lags and a fixed vector of duration lags.
+    pub fn fixed_vector(
+        psi_lags: Array1<f64>,
+        duration_lags: Array1<f64>,
+        p: usize,
+        q: usize,
+    ) -> ACDResult<Self> {
+        verify_psi_lags(&psi_lags, q)?;
+        verify_duration_lags(&duration_lags, p)?;
+
+        Ok(Init::FixedVector {
+            psi_lags,
+            duration_lags,
+        })
     }
 }
 
@@ -393,6 +420,8 @@ impl ACDMeta {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ACDOptions {
     pub init: Init,
+    pub shape: ACDShape,
+    pub innovation: ACDInnovation,
     // pub optimizer: MleOptions,
     pub psi_guards: PsiGuards,
     pub random_seed: Option<u64>,
@@ -407,6 +436,8 @@ impl ACDOptions {
     /// provided arguments are already consistent.
     pub fn new(
         init: Init,
+        shape: ACDShape,
+        innovation: ACDInnovation,
         psi_guards: PsiGuards,
         random_seed: Option<u64>,
         return_norm_resid: bool,
@@ -414,42 +445,13 @@ impl ACDOptions {
     ) -> ACDOptions {
         ACDOptions {
             init,
+            shape,
+            innovation,
             // optimizer: MleOptions::default(),
             psi_guards,
             random_seed,
             return_norm_resid,
             compute_hessian,
-        }
-    }
-}
-
-/// Complete specification of an ACD model *excluding data*.
-///
-/// This bundles:
-/// - [`ACDShape`]: the (p, q) order of the ACD model,
-/// - [`ACDInnovation`]: the innovation distribution (parameterized to unit mean),
-/// - [`ACDOptions`]: estimation and numerical options.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ACDModelSpec {
-    /// Model order: ACD(p, q).
-    pub shape: ACDShape,
-    /// Innovation (error) distribution with unit-mean parameterization.
-    pub innovation: ACDInnovation,
-    /// Estimation and numerical options (initialization, guards, etc.).
-    pub options: ACDOptions,
-}
-
-impl ACDModelSpec {
-    /// Construct an [`ACDModelSpec`] from its components.
-    ///
-    /// This function assumes each component has already been validated by its
-    /// own constructor (e.g., [`ACDShape::new`], `ACDInnovation::*`, [`ACDOptions::new`]).
-    /// No additional checks are performed here.
-    pub fn new(shape: ACDShape, innovation: ACDInnovation, options: ACDOptions) -> ACDModelSpec {
-        ACDModelSpec {
-            shape,
-            innovation,
-            options,
         }
     }
 }
@@ -498,4 +500,34 @@ fn verify_gamma_param(param: f64) -> ACDResult<f64> {
         });
     }
     Ok(param)
+}
+
+fn verify_duration_lags(duration_lags: &Array1<f64>, q: usize) -> ACDResult<()> {
+    if duration_lags.len() != q {
+        return Err(ACDError::InvalidDurationLength {
+            expected: q,
+            actual: duration_lags.len(),
+        });
+    }
+    for (index, &value) in duration_lags.iter().enumerate() {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(ACDError::InvalidDurationLags { index, value });
+        }
+    }
+    Ok(())
+}
+
+fn verify_psi_lags(psi_lags: &Array1<f64>, p: usize) -> ACDResult<()> {
+    if psi_lags.len() != p {
+        return Err(ACDError::InvalidPsiLength {
+            expected: p,
+            actual: psi_lags.len(),
+        });
+    }
+    for (index, &value) in psi_lags.iter().enumerate() {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(ACDError::InvalidPsiLags { index, value });
+        }
+    }
+    Ok(())
 }

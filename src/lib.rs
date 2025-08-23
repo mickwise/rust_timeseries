@@ -30,6 +30,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 pub mod duration;
+pub mod optimization;
 pub mod statistical_tests;
 pub mod utils;
 use crate::{statistical_tests::escanciano_lobato::ELResult, utils::extract_f64_array};

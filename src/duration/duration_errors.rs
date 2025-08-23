@@ -72,6 +72,18 @@ pub enum ACDError {
     /// Init::Fixed(v) must be finite and > 0.
     InvalidInitFixed { value: f64 },
 
+    /// Init::FixedVector must have duration lags length equal to q.
+    InvalidDurationLength { expected: usize, actual: usize },
+
+    /// Init::FixedVector's duration lags must be positive and finite.
+    InvalidDurationLags { index: usize, value: f64 },
+
+    /// Init::FixedVector must have psi length equal to p.
+    InvalidPsiLength { expected: usize, actual: usize },
+
+    /// Init::FixedVector's psi values must be finite and > 0.
+    InvalidPsiLags { index: usize, value: f64 },
+
     // ---- Model/recursion invariants ----
     /// Recursion produced a non-finite ψ_t (after guards/clamps).
     NonFinitePsi { t: usize, value: f64 },
@@ -144,6 +156,30 @@ impl std::fmt::Display for ACDError {
             ACDError::InvalidInitFixed { value } => {
                 write!(f, "Init::Fixed must be finite and > 0; got: {value}")
             }
+            ACDError::InvalidDurationLength { expected, actual } => {
+                write!(
+                    f,
+                    "Init::FixedVector must have duration length equal to q: expected {expected}, got {actual}"
+                )
+            }
+            ACDError::InvalidDurationLags { index, value } => {
+                write!(
+                    f,
+                    "Init::FixedVector's duration lags must be positive and finite; index {index} has value {value}"
+                )
+            }
+            ACDError::InvalidPsiLength { expected, actual } => {
+                write!(
+                    f,
+                    "Init::FixedVector must have psi length equal to p: expected {expected}, got {actual}"
+                )
+            }
+            ACDError::InvalidPsiLags { index, value } => {
+                write!(
+                    f,
+                    "Init::FixedVector's psi lag values must be finite and > 0; index {index} has value {value}"
+                )
+            }
             ACDError::NonFinitePsi { t, value } => {
                 write!(
                     f,
@@ -169,10 +205,28 @@ impl std::convert::From<ACDError> for PyErr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParamError {
     /// Model not stationary (sum of alpha and beta >= 1).
-    StationarityViolated(ACDError),
+    StationarityViolated { coeff_sum: f64 },
 
     /// Theta length mismatch for ACDParams.
     ThetaLengthMismatch { expected: usize, actual: usize },
+
+    /// Omega must be finite and > 0.
+    InvalidOmega { value: f64 },
+
+    /// Alpha length mismatch for ACDParams.
+    AlphaLengthMismatch { expected: usize, actual: usize },
+
+    /// Alpha coordinates need to be non-negative.
+    InvalidAlpha { index: usize, value: f64 },
+
+    /// Beta length mismatch for ACDParams.
+    BetaLengthMismatch { expected: usize, actual: usize },
+
+    /// Beta coordinates need to be non-negative.
+    InvalidBeta { index: usize, value: f64 },
+
+    /// Slack value must be non-negative.
+    InvalidSlack { value: f64 },
 }
 
 impl std::error::Error for ParamError {}
@@ -180,8 +234,12 @@ impl std::error::Error for ParamError {}
 impl std::fmt::Display for ParamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParamError::StationarityViolated(err) => {
-                write!(f, "Model parameters violate stationarity: {}", err)
+            ParamError::StationarityViolated { coeff_sum } => {
+                write!(
+                    f,
+                    "Model not stationary: sum of alpha and beta is {} (>= 1 is not allowed)",
+                    coeff_sum
+                )
             }
             ParamError::ThetaLengthMismatch { expected, actual } => {
                 write!(
@@ -190,6 +248,50 @@ impl std::fmt::Display for ParamError {
                     expected, actual
                 )
             }
+            ParamError::InvalidOmega { value } => {
+                write!(f, "Omega must be finite and > 0, got {}", value)
+            }
+            ParamError::AlphaLengthMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "Alpha length mismatch: expected {}, got {}",
+                    expected, actual
+                )
+            }
+            ParamError::InvalidAlpha { index, value } => {
+                write!(
+                    f,
+                    "Alpha coordinate at index {} must be non-negative and finite, got {}",
+                    index, value
+                )
+            }
+            ParamError::BetaLengthMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "Beta length mismatch: expected {}, got {}",
+                    expected, actual
+                )
+            }
+            ParamError::InvalidBeta { index, value } => {
+                write!(
+                    f,
+                    "Beta coordinate at index {} must be non-negative and finite, got {}",
+                    index, value
+                )
+            }
+            ParamError::InvalidSlack { value } => {
+                write!(
+                    f,
+                    "Slack value must be non-negative and finite, got {}",
+                    value
+                )
+            }
         }
+    }
+}
+
+impl std::convert::From<ParamError> for PyErr {
+    fn from(err: ParamError) -> PyErr {
+        PyValueError::new_err(err.to_string())
     }
 }
