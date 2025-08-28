@@ -1,5 +1,7 @@
 use argmin::core::{ArgminError, Error};
 
+use crate::duration::errors::{ACDError, ParamError};
+
 /// Crate-wide result alias for optimizer operations.
 pub type OptResult<T> = Result<T, OptError>;
 
@@ -76,30 +78,108 @@ pub enum OptError {
     MissingThetaHat,
 
     // ---- Argmin ---
+    /// Wrapper for argmin::InvalidParameter
     InvalidParameter {
         text: String,
     },
+    /// Wrapper for argmin::NotImplemented
     NotImplemented {
         text: String,
     },
+    /// Wrapper for argmin::NotInitialized
     NotInitialized {
         text: String,
     },
+    /// Wrapper for argmin::ConditionViolated
     ConditionViolated {
         text: String,
     },
+    /// Wrapper for argmin::CheckPointNotFound
     CheckPointNotFound {
         text: String,
     },
+    /// Wrapper for argmin::PotentialBug
     PotentialBug {
         text: String,
     },
+    /// Wrapper for argmin::ImpossibleError
     ImpossibleError {
         text: String,
     },
+    /// Wrapper for other argmin::Error types
     BackendError {
         text: String,
     },
+
+    // ---- ACD Errors ----
+    /// Invalid input to log-likelihood function
+    InvalidLogLikInput {
+        value: f64,
+    },
+    /// Invalid psi value in log-likelihood function
+    InvalidPsiLogLik {
+        value: f64,
+    },
+    /// Invalid Weibull parameter
+    InvalidExpParam,
+    /// Scale parameter is invalid (<= 0 or non-finite)
+    ScaleInvalid,
+    /// Shape parameter is invalid (<= 0 or non-finite)
+    ShapeInvalid,
+
+    // ---- Param Errors ----
+    /// Model not stationary (sum of alpha and beta >= 1).
+    StationarityViolated {
+        coeff_sum: f64,
+    },
+
+    /// Theta length mismatch for ACDParams.
+    ThetaLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+
+    /// Omega must be finite and > 0.
+    InvalidOmega {
+        value: f64,
+    },
+
+    /// Alpha length mismatch for ACDParams.
+    AlphaLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+
+    /// Alpha coordinates need to be non-negative.
+    InvalidAlpha {
+        index: usize,
+        value: f64,
+    },
+
+    /// Beta length mismatch for ACDParams.
+    BetaLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+
+    /// Beta coordinates need to be non-negative.
+    InvalidBeta {
+        index: usize,
+        value: f64,
+    },
+
+    /// Slack value must be non-negative.
+    InvalidSlack {
+        value: f64,
+    },
+
+    /// Unconstrained optimization input must have finite values.
+    InvalidThetaInput {
+        index: usize,
+        value: f64,
+    },
+
+    // ---- Fallback ----
     UnknownError,
 }
 
@@ -180,6 +260,57 @@ impl std::fmt::Display for OptError {
             OptError::BackendError { text } => {
                 write!(f, "Backend error: {text}")
             }
+
+            // ---- ACD Errors ----
+            OptError::InvalidLogLikInput { value } => {
+                write!(f, "Invalid input to log-likelihood function: {value}")
+            }
+            OptError::InvalidPsiLogLik { value } => {
+                write!(f, "Invalid psi value in log-likelihood function: {value}")
+            }
+            OptError::InvalidExpParam => {
+                write!(f, "Invalid exponential parameter")
+            }
+            OptError::ScaleInvalid => {
+                write!(f, "Scale parameter is invalid (<= 0 or non-finite)")
+            }
+            OptError::ShapeInvalid => {
+                write!(f, "Shape parameter is invalid (<= 0 or non-finite)")
+            }
+
+            // ---- Param Errors ----
+            OptError::StationarityViolated { coeff_sum } => {
+                write!(
+                    f,
+                    "Model not stationary: sum of alpha and beta is {coeff_sum}, which is >= 1"
+                )
+            }
+            OptError::ThetaLengthMismatch { expected, actual } => {
+                write!(f, "Theta length mismatch: expected {expected}, actual {actual}")
+            }
+            OptError::InvalidOmega { value } => {
+                write!(f, "Invalid omega parameter: {value}, must be finite and > 0")
+            }
+            OptError::AlphaLengthMismatch { expected, actual } => {
+                write!(f, "Alpha length mismatch: expected {expected}, actual {actual}")
+            }
+            OptError::InvalidAlpha { index, value } => {
+                write!(f, "Invalid alpha at index {index}: {value}, must be non-negative")
+            }
+            OptError::BetaLengthMismatch { expected, actual } => {
+                write!(f, "Beta length mismatch: expected {expected}, actual {actual}")
+            }
+            OptError::InvalidBeta { index, value } => {
+                write!(f, "Invalid beta at index {index}: {value}, must be non-negative")
+            }
+            OptError::InvalidSlack { value } => {
+                write!(f, "Invalid slack value: {value}, must be non-negative")
+            }
+            OptError::InvalidThetaInput { index, value } => {
+                write!(f, "Invalid theta input at index {index}: {value}, must be finite")
+            }
+
+            // ---- Fallback ----
             OptError::UnknownError => {
                 write!(f, "Unknown error")
             }
@@ -201,6 +332,45 @@ impl From<Error> for OptError {
                 _ => OptError::UnknownError,
             },
             Err(err) => OptError::BackendError { text: err.to_string() },
+        }
+    }
+}
+
+impl From<ACDError> for OptError {
+    fn from(err: ACDError) -> Self {
+        match err {
+            ACDError::InvalidLogLikInput { value } => OptError::InvalidLogLikInput { value },
+            ACDError::InvalidPsiLogLik { value } => OptError::InvalidPsiLogLik { value },
+            ACDError::InvalidExpParam => OptError::InvalidExpParam,
+            ACDError::ScaleInvalid => OptError::ScaleInvalid,
+            ACDError::ShapeInvalid => OptError::ShapeInvalid,
+            _ => OptError::UnknownError,
+        }
+    }
+}
+
+impl From<ParamError> for OptError {
+    fn from(err: ParamError) -> Self {
+        match err {
+            ParamError::StationarityViolated { coeff_sum } => {
+                OptError::StationarityViolated { coeff_sum }
+            }
+            ParamError::ThetaLengthMismatch { expected, actual } => {
+                OptError::ThetaLengthMismatch { expected, actual }
+            }
+            ParamError::InvalidOmega { value } => OptError::InvalidOmega { value },
+            ParamError::AlphaLengthMismatch { expected, actual } => {
+                OptError::AlphaLengthMismatch { expected, actual }
+            }
+            ParamError::InvalidAlpha { index, value } => OptError::InvalidAlpha { index, value },
+            ParamError::BetaLengthMismatch { expected, actual } => {
+                OptError::BetaLengthMismatch { expected, actual }
+            }
+            ParamError::InvalidBeta { index, value } => OptError::InvalidBeta { index, value },
+            ParamError::InvalidSlack { value } => OptError::InvalidSlack { value },
+            ParamError::InvalidThetaInput { index, value } => {
+                OptError::InvalidThetaInput { index, value }
+            }
         }
     }
 }

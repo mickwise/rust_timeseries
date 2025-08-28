@@ -2,27 +2,21 @@
 //!
 //! This module centralizes small, reusable checks used across the duration
 //! stack—distribution parameters, pre-sample lags, and model-space parameter
-//! validity (ω, α, β, slack, stationarity).
+//! validity (ω, α, β, stationarity).
 //!
 //! **Convention (Wikipedia-style):**
 //! - `q` = number of **α** terms (lags on durations τ).
 //! - `p` = number of **β** terms (lags on conditional means ψ).
 //!
 //! **Stationarity margin:** we enforce strict stationarity by reserving a small
-//! buffer `1e-6`, so `sum(α) + sum(β) + slack = 1 - margin`. Staying off the
-//! boundary avoids numerical blow-ups during recursion/likelihood.
-use crate::duration::errors::{ACDError, ACDResult, ParamError, ParamResult};
-use ndarray::Array1;
-
-/// Safety margin for strict stationarity in ACD models.
-///
-/// In an ACD(p, q), the stability condition requires
-///   sum(alpha) + sum(beta) < 1.
-/// This margin enforces the inequality *strictly* by reserving a small
-/// buffer (default = 1e-6). Practically, the recursion always runs inside
-/// the stable region, avoiding borderline cases that can cause blow-ups
-/// in likelihood evaluation.
-const STATIONARITY_MARGIN: f64 = 1e-6;
+//! buffer `1e-6`, so `sum(α) + sum(β) ≤ 1 - margin`. In the optimizer mapping
+//! without an explicit slack coordinate, `sum(α) + sum(β)` is set exactly to
+//! `1 - margin`, which stays safely away from the true boundary at 1.
+use crate::{
+    duration::errors::{ACDError, ACDResult, ParamError, ParamResult},
+    optimization::numerical_stability::transformations::STATIONARITY_MARGIN,
+};
+use ndarray::{Array1, ArrayView1};
 
 /// Validate one Weibull parameter (scale or shape).
 ///
@@ -121,7 +115,7 @@ pub fn validate_omega(omega: f64) -> ParamResult<()> {
 /// # Errors
 /// - [`ParamError::AlphaLengthMismatch`] on length mismatch,
 /// - [`ParamError::InvalidAlpha`] if any element is < 0 or non-finite.
-pub fn validate_alpha(alpha: &Array1<f64>, q: usize) -> ParamResult<()> {
+pub fn validate_alpha(alpha: ArrayView1<f64>, q: usize) -> ParamResult<()> {
     if alpha.len() != q {
         return Err(ParamError::AlphaLengthMismatch { expected: q, actual: alpha.len() });
     }
@@ -140,7 +134,7 @@ pub fn validate_alpha(alpha: &Array1<f64>, q: usize) -> ParamResult<()> {
 /// # Errors
 /// - [`ParamError::BetaLengthMismatch`] on length mismatch,
 /// - [`ParamError::InvalidBeta`] if any element is < 0 or non-finite.
-pub fn validate_beta(beta: &Array1<f64>, p: usize) -> ParamResult<()> {
+pub fn validate_beta(beta: ArrayView1<f64>, p: usize) -> ParamResult<()> {
     if beta.len() != p {
         return Err(ParamError::BetaLengthMismatch { expected: p, actual: beta.len() });
     }
@@ -148,6 +142,25 @@ pub fn validate_beta(beta: &Array1<f64>, p: usize) -> ParamResult<()> {
         beta.iter().enumerate().find(|(_, v)| **v < 0.0 || !(**v).is_finite())
     {
         return Err(ParamError::InvalidBeta { index, value });
+    }
+    Ok(())
+}
+
+/// Validate alpha and beta lengths.
+///
+/// Checks that `len(α) == q` and `len(β) == p`.
+///
+/// # Errors
+/// - [`ParamError::AlphaLengthMismatch`] if `len(α) != q`
+/// - [`ParamError::BetaLengthMismatch`] if `len(β) != p`
+pub fn validate_alpha_beta_lengths(
+    alpha: &ArrayView1<f64>, beta: &ArrayView1<f64>, q: usize, p: usize,
+) -> ParamResult<()> {
+    if alpha.len() != q {
+        return Err(ParamError::AlphaLengthMismatch { expected: q, actual: alpha.len() });
+    }
+    if beta.len() != p {
+        return Err(ParamError::BetaLengthMismatch { expected: p, actual: beta.len() });
     }
     Ok(())
 }
@@ -162,12 +175,9 @@ pub fn validate_beta(beta: &Array1<f64>, p: usize) -> ParamResult<()> {
 /// - [`ParamError::InvalidSlack`] if `slack` is negative or non-finite,
 /// - [`ParamError::StationarityViolated`] if the equality is violated.
 pub fn validate_stationarity_and_slack(
-    alpha: &Array1<f64>, beta: &Array1<f64>, slack: f64,
+    alpha: &ArrayView1<f64>, beta: &ArrayView1<f64>, slack: f64,
 ) -> ParamResult<()> {
-    if slack < 0.0 {
-        return Err(ParamError::InvalidSlack { value: slack });
-    }
-    if !slack.is_finite() {
+    if !(slack >= 0.0 && slack.is_finite()) {
         return Err(ParamError::InvalidSlack { value: slack });
     }
     let sum_alpha = alpha.sum();
@@ -197,6 +207,33 @@ pub fn validate_loglik_params(x: f64, psi: f64) -> ACDResult<()> {
     }
     if !psi.is_finite() || psi <= 0.0 {
         return Err(ACDError::InvalidPsiLogLik { value: psi });
+    }
+    Ok(())
+}
+
+/// Validate unconstrained parameters for optimization.
+///
+/// Checks:
+/// - `len(θ) == 1 + p + q` (ω plus logits for α and β),
+/// - every entry is finite.
+///
+/// # Errors
+/// - Returns [`ParamError::ThetaLengthMismatch`] if length is incorrect.
+/// - Returns [`ParamError::InvalidThetaInput`] with index and value on failure.
+pub fn validate_theta<'a>(
+    theta: ndarray::ArrayView1<'a, f64>, p: usize, q: usize,
+) -> ParamResult<()> {
+    let expected_len = 1 + p + q;
+    if theta.len() != expected_len {
+        return Err(ParamError::ThetaLengthMismatch {
+            expected: expected_len,
+            actual: theta.len(),
+        });
+    }
+    for (index, &value) in theta.iter().enumerate() {
+        if !value.is_finite() {
+            return Err(ParamError::InvalidThetaInput { index, value });
+        }
     }
     Ok(())
 }

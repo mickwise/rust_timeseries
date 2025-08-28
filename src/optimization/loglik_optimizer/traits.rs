@@ -8,8 +8,6 @@
 //! Convention: we *maximize* a user log-likelihood `ℓ(θ)` by minimizing the cost
 //! `c(θ) = -ℓ(θ)`. If an analytic gradient is provided, it should be the gradient
 //! of the log-likelihood (`∇ℓ(θ)`); the adapter flips the sign as needed.
-use std::str::FromStr;
-
 use crate::optimization::{
     errors::{OptError, OptResult},
     loglik_optimizer::{
@@ -19,6 +17,7 @@ use crate::optimization::{
 };
 use argmin::core::TerminationStatus;
 use argmin_math::ArgminL2Norm;
+use std::str::FromStr;
 
 /// User-implemented log-likelihood interface.
 ///
@@ -37,8 +36,8 @@ use argmin_math::ArgminL2Norm;
 /// Optional:
 /// - `grad(&Theta, &Data) -> OptResult<Grad>`: analytic gradient `∇ℓ(θ)`.
 ///   If not implemented, robust finite differences are used automatically.
-pub trait LogLikelihood: Sync + Send {
-    type Data: Sync + Send + 'static;
+pub trait LogLikelihood {
+    type Data: 'static;
 
     // Required methods
     fn value(&self, theta: &Theta, data: &Self::Data) -> OptResult<Cost>;

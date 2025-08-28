@@ -97,10 +97,6 @@ pub enum ACDError {
     /// Optimizer failed; include a human-readable status/reason.
     OptimizationFailed { status: String },
 
-    // ---- Diagnostics / residuals (optional features) ----
-    /// Requested normalized residuals but innovation CDF/quantile not available.
-    CdfNotAvailable,
-
     // ---- statsrs distribution errors ----
     /// Wrapper for statrs::distribution::ExpError
     InvalidExpParam,
@@ -198,9 +194,6 @@ impl std::fmt::Display for ACDError {
             ACDError::OptimizationFailed { status } => {
                 write!(f, "Optimizer failed with status: {status}")
             }
-            ACDError::CdfNotAvailable => {
-                write!(f, "CDF/quantile not available for normalized residuals.")
-            }
             ACDError::InvalidExpParam => {
                 write!(f, "Exponential distribution requires rate > 0.")
             }
@@ -271,6 +264,9 @@ pub enum ParamError {
 
     /// Slack value must be non-negative.
     InvalidSlack { value: f64 },
+
+    /// Unconstrained optimization input must have finite values.
+    InvalidThetaInput { index: usize, value: f64 },
 }
 
 impl std::error::Error for ParamError {}
@@ -310,6 +306,9 @@ impl std::fmt::Display for ParamError {
             }
             ParamError::InvalidSlack { value } => {
                 write!(f, "Slack value must be non-negative and finite, got {value}")
+            }
+            ParamError::InvalidThetaInput { index, value } => {
+                write!(f, "Theta input at index {index} must be finite, got {value}")
             }
         }
     }

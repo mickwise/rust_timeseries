@@ -8,3 +8,4 @@ pub mod psi;
 pub mod shape;
 pub mod units;
 pub mod validation;
+pub mod workspace;
