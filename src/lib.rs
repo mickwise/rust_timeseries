@@ -79,18 +79,12 @@ impl EscancianoLobato {
         text_signature = "(data, /, q=2.4, d=None)",
         signature = (raw_data, q = 2.4, d = None)
     )]
+    #[allow(clippy::self_named_constructors)]
     pub fn escanciano_lobato<'py>(
-        py: Python<'py>,
-        raw_data: &Bound<'py, PyAny>,
-        q: Option<f64>,
-        d: Option<usize>,
+        py: Python<'py>, raw_data: &Bound<'py, PyAny>, q: Option<f64>, d: Option<usize>,
     ) -> PyResult<EscancianoLobato> {
         let q: f64 = q.map_or(Ok(2.4), |v| {
-            if v > 0.0 {
-                Ok(v)
-            } else {
-                Err(PyValueError::new_err("q must be positive"))
-            }
+            if v > 0.0 { Ok(v) } else { Err(PyValueError::new_err("q must be positive")) }
         })?;
 
         let arr: PyReadonlyArray1<f64> = extract_f64_array(py, raw_data)?;
@@ -107,11 +101,7 @@ impl EscancianoLobato {
 
         let default_d: usize = (data.len() as f64).powf(0.2) as usize;
         let d: usize = d.map_or(Ok(default_d), |v| {
-            if v > 0 {
-                Ok(v)
-            } else {
-                Err(PyValueError::new_err("d must be positive"))
-            }
+            if v > 0 { Ok(v) } else { Err(PyValueError::new_err("d must be positive")) }
         })?;
         let result = ELResult::escanciano_lobato(data, q, d)?;
         Ok(EscancianoLobato { inner: result })
@@ -149,9 +139,7 @@ fn _rust_timeseries<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult
 }
 
 fn statistical_tests<'py>(
-    _py: Python,
-    rust_timeseries: &Bound<'py, PyModule>,
-    m: &Bound<'py, PyModule>,
+    _py: Python, rust_timeseries: &Bound<'py, PyModule>, m: &Bound<'py, PyModule>,
 ) -> PyResult<()> {
     m.add_class::<EscancianoLobato>()?;
     rust_timeseries.add_submodule(m)?;

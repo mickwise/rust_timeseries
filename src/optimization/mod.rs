@@ -1,2 +1,2 @@
-pub mod opt_errors;
-pub mod optimizer;
+pub mod errors;
+pub mod loglik_optimizer;

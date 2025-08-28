@@ -11,8 +11,7 @@
 //!
 //! where Lₚ = Qₚ* – π(p,n,q) and π(p,n,q) switches between BIC and AIC
 //! penalties according to Eq. (4) of the paper.
-
-use crate::statistical_tests::stat_tests_errors;
+use crate::statistical_tests::errors;
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 /// Result of the Escanciano–Lobato automatic portmanteau test.
@@ -55,11 +54,7 @@ impl ELResult {
     /// assert!(1 <= result.p_tilde() && result.p_tilde() <= 4);
     /// println!("Q* = {:.3}, p-value = {:.3}", result.stat(), result.p_value());
     /// ```
-    pub fn escanciano_lobato(
-        data: &[f64],
-        q: f64,
-        d: usize,
-    ) -> Result<Self, stat_tests_errors::ELError> {
+    pub fn escanciano_lobato(data: &[f64], q: f64, d: usize) -> Result<Self, errors::ELError> {
         let n: f64 = data.len() as f64;
         let mean: f64 = calc_mean(data);
         let rho_tilde: Vec<f64> = calc_rho_tilde(data, d, mean)?;
@@ -136,27 +131,20 @@ fn calc_gamma_j(data: &[f64], j: usize, mean: f64) -> f64 {
 fn calc_pi(p: usize, n: f64, q: f64, max_lag_abs: f64) -> f64 {
     let log_n: f64 = n.ln();
     let cutoff: f64 = (q * log_n).sqrt();
-    if n.sqrt() * max_lag_abs <= cutoff {
-        (p as f64) * log_n
-    } else {
-        (2 * p) as f64
-    }
+    if n.sqrt() * max_lag_abs <= cutoff { (p as f64) * log_n } else { (2 * p) as f64 }
 }
 
 /// Populate the vector {ρ̃ⱼ²}₍ⱼ₌₁₎ᵈ with  
 /// ρ̃ⱼ² = γ̂ⱼ² ⁄ τ̂ⱼ.
 #[inline]
-fn calc_rho_tilde(
-    data: &[f64],
-    d: usize,
-    mean: f64,
-) -> Result<Vec<f64>, stat_tests_errors::ELError> {
+#[allow(clippy::needless_range_loop)]
+fn calc_rho_tilde(data: &[f64], d: usize, mean: f64) -> Result<Vec<f64>, errors::ELError> {
     let mut rho_tilde = vec![0.0; d + 1];
     for j in 1..=d {
         let gamma_j = calc_gamma_j(data, j, mean);
         let tau_j = calc_tau_j(data, j, mean);
         if tau_j == 0.0 {
-            return Err(stat_tests_errors::ELError::ZeroTau(j));
+            return Err(errors::ELError::ZeroTau(j));
         }
         rho_tilde[j] = gamma_j.powi(2) / tau_j;
     }
@@ -174,11 +162,8 @@ fn calc_robust_box_pierce(rhos: &[f64], n: f64, p: usize) -> f64 {
 /// where Lₚ = Qₚ* – π(p,n,q).
 #[inline]
 fn calc_p_tilde(
-    data: &[f64],
-    d: usize,
-    q: f64,
-    rho_tilde: &[f64],
-) -> Result<usize, stat_tests_errors::ELError> {
+    data: &[f64], d: usize, q: f64, rho_tilde: &[f64],
+) -> Result<usize, errors::ELError> {
     let n: f64 = data.len() as f64;
     let mut p_tilde: usize = 0;
     let mut max_l_val: f64 = f64::NEG_INFINITY;

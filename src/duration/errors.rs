@@ -1,32 +1,35 @@
 //! Errors for ACD duration models (data validation, meta/options checks,
 //! recursion invariants, and optimizer failures).
 //!
-//! This module defines a single error type, [`ACDError`], used across the
-//! Python-facing API and the internal Rust core.
+//! This module defines a model error type, [`ACDError`], and a parameter error
+//! type, [`ParamError`], used across the Python-facing API and the internal Rust
+//! core. Both implement `Display`/`Error` and convert to `PyErr` for PyO3.
 //!
 //! ## Conventions
 //! - **Indices are 0-based** (match Rust/NumPy).
 //! - Durations must be **strictly positive and finite**.
-//! - `t0` is the number of initial observations used *only* to warm the
-//!   ψ recursion; they are excluded from the likelihood.
+//! - `t0` is an optional index marking the start of the likelihood window;
+//!   it has **no effect** on ψ recursion and only controls how many initial
+//!   observations are skipped when evaluating the log-likelihood.
 //! - Optimizer/backend errors are normalized to
-//!   [`ACDError::OptimizationFailed`] with a human-readable status string.
-
+//!   [`ACDError::OptimizationFailed`] with a human-readable status.
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use statrs::distribution::{ExpError, WeibullError};
 
-/// Crate-wide result alias for ACD operations.
+/// Crate-wide result alias for ACD operations that may produce [`ACDError`].
 pub type ACDResult<T> = Result<T, ACDError>;
 
-/// Crate-wide result alias for parameter errors.
+/// Result alias for parameter-construction/validation paths that may produce
+/// [`ParamError`].
 pub type ParamResult<T> = Result<T, ParamError>;
 
 /// Unified error type for ACD modeling.
 ///
-/// Variants cover input/data validation, meta/options checks,
-/// recursion/structural invariants, and optimizer/diagnostic failures.
-/// The error implements `Display`, `Error`, and converts to a Python
-/// `ValueError` for PyO3 boundaries.
+/// Covers input/data validation, meta/options checks, recursion/structural
+/// invariants, estimation/optimizer failures, and optional diagnostics.
+/// Implements `Display`/`Error` and converts to a Python `ValueError` at
+/// PyO3 boundaries.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ACDError {
     // ---- Input/data validation ----
@@ -46,7 +49,7 @@ pub enum ACDError {
     /// Innovations with Weibull distribution must have finite and strictly positive parameters.
     InvalidWeibullParam { param: f64, reason: &'static str },
 
-    ///Innovations for Weibull distribution must fulfill the unit mean condition.
+    /// Innovations for Weibull distribution must fulfill the unit mean condition.
     InvalidUnitMeanWeibull { mean: f64 },
 
     /// Innovations with generalized Gamma distribution must have finite and strictly positive parameters.
@@ -58,16 +61,18 @@ pub enum ACDError {
     /// At least one model shape parameter must be finite and > 0.
     InvalidModelShape { param: f64 },
 
+    /// Input for log-likelihood must be strictly positive and finite.
+    InvalidLogLikInput { value: f64 },
+
+    /// Psi value must be strictly positive and finite.
+    InvalidPsiLogLik { value: f64 },
+
     // ---- Meta / options validation ----
     /// epsilon_floor must be finite and > 0.
     InvalidEpsilonFloor { value: f64 },
 
     /// Psi guards must be finite with 0 < min < max.
-    InvalidPsiGuards {
-        min: f64,
-        max: f64,
-        reason: &'static str,
-    },
+    InvalidPsiGuards { min: f64, max: f64, reason: &'static str },
 
     /// Init::Fixed(v) must be finite and > 0.
     InvalidInitFixed { value: f64 },
@@ -95,6 +100,19 @@ pub enum ACDError {
     // ---- Diagnostics / residuals (optional features) ----
     /// Requested normalized residuals but innovation CDF/quantile not available.
     CdfNotAvailable,
+
+    // ---- statsrs distribution errors ----
+    /// Wrapper for statrs::distribution::ExpError
+    InvalidExpParam,
+
+    /// Wrapper for statrs::distribution::WeibullError::ScaleInvalid
+    ScaleInvalid,
+
+    /// Wrapper for statrs::distribution::WeibullError::ShapeInvalid
+    ShapeInvalid,
+
+    /// Catch-all for unhandled statrs::distribution errors.
+    UnknownError,
 }
 
 impl std::error::Error for ACDError {}
@@ -115,10 +133,7 @@ impl std::fmt::Display for ACDError {
                 write!(f, "Burn-in t0 ({t0}) exceeds series length ({len}).")
             }
             ACDError::InvalidWeibullParam { param, reason } => {
-                write!(
-                    f,
-                    "Weibull parameter must be finite and > 0; got: {param}. {reason}"
-                )
+                write!(f, "Weibull parameter must be finite and > 0; got: {param}. {reason}")
             }
             ACDError::InvalidGenGammaParam { param, reason } => {
                 write!(
@@ -127,31 +142,28 @@ impl std::fmt::Display for ACDError {
                 )
             }
             ACDError::InvalidUnitMeanWeibull { mean } => {
-                write!(
-                    f,
-                    "Weibull parameters must fulfill unit mean condition: {mean}."
-                )
+                write!(f, "Weibull parameters must fulfill unit mean condition: {mean}.")
             }
             ACDError::InvalidUnitMeanGenGamma { mean } => {
-                write!(
-                    f,
-                    "Generalized Gamma parameters must fulfill unit mean condition: {mean}."
-                )
+                write!(f, "Generalized Gamma parameters must fulfill unit mean condition: {mean}.")
             }
             ACDError::InvalidModelShape { param } => {
+                write!(f, "At least one model shape parameter must be finite and > 0; got: {param}")
+            }
+            ACDError::InvalidLogLikInput { value } => {
+                write!(f, "Log-likelihood input must be strictly positive and finite; got: {value}")
+            }
+            ACDError::InvalidPsiLogLik { value } => {
                 write!(
                     f,
-                    "At least one model shape parameter must be finite and > 0; got: {param}"
+                    "Psi value for log-likelihood must be strictly positive and finite; got: {value}"
                 )
             }
             ACDError::InvalidEpsilonFloor { value } => {
                 write!(f, "epsilon_floor must be finite and > 0; got: {value}")
             }
             ACDError::InvalidPsiGuards { min, max, reason } => {
-                write!(
-                    f,
-                    "Psi guards must be finite with 0 < min ({min}) < max ({max}); {reason}"
-                )
+                write!(f, "Psi guards must be finite with 0 < min ({min}) < max ({max}); {reason}")
             }
             ACDError::InvalidInitFixed { value } => {
                 write!(f, "Init::Fixed must be finite and > 0; got: {value}")
@@ -181,10 +193,7 @@ impl std::fmt::Display for ACDError {
                 )
             }
             ACDError::NonFinitePsi { t, value } => {
-                write!(
-                    f,
-                    "Recursion produced non-finite psi_t at index {t}: {value}"
-                )
+                write!(f, "Recursion produced non-finite psi_t at index {t}: {value}")
             }
             ACDError::OptimizationFailed { status } => {
                 write!(f, "Optimizer failed with status: {status}")
@@ -192,16 +201,51 @@ impl std::fmt::Display for ACDError {
             ACDError::CdfNotAvailable => {
                 write!(f, "CDF/quantile not available for normalized residuals.")
             }
+            ACDError::InvalidExpParam => {
+                write!(f, "Exponential distribution requires rate > 0.")
+            }
+            ACDError::ScaleInvalid => {
+                write!(f, "Weibull distribution scale parameter must be > 0.")
+            }
+            ACDError::ShapeInvalid => {
+                write!(f, "Weibull distribution shape parameter must be > 0.")
+            }
+            ACDError::UnknownError => {
+                write!(f, "An unknown error occurred in the distribution.")
+            }
         }
     }
 }
 
+/// Convert an [`ACDError`] into a Python `ValueError` with the error message.
+///
+/// This is used at the Rust↔Python boundary to surface domain errors cleanly.
 impl std::convert::From<ACDError> for PyErr {
     fn from(err: ACDError) -> PyErr {
         PyValueError::new_err(err.to_string())
     }
 }
 
+impl From<ExpError> for ACDError {
+    fn from(_: ExpError) -> ACDError {
+        ACDError::InvalidExpParam {}
+    }
+}
+
+impl From<WeibullError> for ACDError {
+    fn from(err: WeibullError) -> ACDError {
+        match err {
+            WeibullError::ScaleInvalid => ACDError::ScaleInvalid,
+            WeibullError::ShapeInvalid => ACDError::ShapeInvalid,
+            _ => ACDError::UnknownError,
+        }
+    }
+}
+
+/// Errors specific to parameter construction and validation.
+///
+/// Typical causes include stationarity violations, length mismatches for α/β,
+/// and non-finite or negative coordinates.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParamError {
     /// Model not stationary (sum of alpha and beta >= 1).
@@ -237,59 +281,41 @@ impl std::fmt::Display for ParamError {
             ParamError::StationarityViolated { coeff_sum } => {
                 write!(
                     f,
-                    "Model not stationary: sum of alpha and beta is {} (>= 1 is not allowed)",
-                    coeff_sum
+                    "Model not stationary: sum of alpha and beta is {coeff_sum} (>= 1 is not allowed)",
                 )
             }
             ParamError::ThetaLengthMismatch { expected, actual } => {
-                write!(
-                    f,
-                    "Theta length mismatch: expected {}, got {}",
-                    expected, actual
-                )
+                write!(f, "Theta length mismatch: expected {expected}, got {actual}")
             }
             ParamError::InvalidOmega { value } => {
-                write!(f, "Omega must be finite and > 0, got {}", value)
+                write!(f, "Omega must be finite and > 0, got {value}")
             }
             ParamError::AlphaLengthMismatch { expected, actual } => {
-                write!(
-                    f,
-                    "Alpha length mismatch: expected {}, got {}",
-                    expected, actual
-                )
+                write!(f, "Alpha length mismatch: expected {expected}, got {actual}")
             }
             ParamError::InvalidAlpha { index, value } => {
                 write!(
                     f,
-                    "Alpha coordinate at index {} must be non-negative and finite, got {}",
-                    index, value
+                    "Alpha coordinate at index {index} must be non-negative and finite, got {value}"
                 )
             }
             ParamError::BetaLengthMismatch { expected, actual } => {
-                write!(
-                    f,
-                    "Beta length mismatch: expected {}, got {}",
-                    expected, actual
-                )
+                write!(f, "Beta length mismatch: expected {expected}, got {actual}")
             }
             ParamError::InvalidBeta { index, value } => {
                 write!(
                     f,
-                    "Beta coordinate at index {} must be non-negative and finite, got {}",
-                    index, value
+                    "Beta coordinate at index {index} must be non-negative and finite, got {value}",
                 )
             }
             ParamError::InvalidSlack { value } => {
-                write!(
-                    f,
-                    "Slack value must be non-negative and finite, got {}",
-                    value
-                )
+                write!(f, "Slack value must be non-negative and finite, got {value}")
             }
         }
     }
 }
 
+/// Convert a [`ParamError`] into a Python `ValueError` with the error message.
 impl std::convert::From<ParamError> for PyErr {
     fn from(err: ParamError) -> PyErr {
         PyValueError::new_err(err.to_string())

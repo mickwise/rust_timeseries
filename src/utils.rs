@@ -9,8 +9,7 @@ use pyo3::{prelude::*, types::PyAny};
 /// Copies only when contiguity cannot be guaranteed.
 #[inline]
 pub fn extract_f64_array<'py>(
-    py: Python<'py>,
-    raw_data: &Bound<'py, PyAny>,
+    py: Python<'py>, raw_data: &Bound<'py, PyAny>,
 ) -> PyResult<PyReadonlyArray1<'py, f64>> {
     if let Ok(arr_ro) = raw_data.extract::<PyReadonlyArray1<f64>>() {
         if arr_ro.as_slice().is_ok() {

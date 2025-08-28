@@ -1,0 +1,13 @@
+max_width = 100
+newline_style = "Unix"
+
+# Imports
+reorder_imports = true
+
+
+# Style tweaks
+use_field_init_shorthand = true
+
+# Heuristics (optional, all stable)
+use_small_heuristics = "Max"
+fn_params_layout = "Compressed"
