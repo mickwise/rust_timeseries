@@ -7,7 +7,7 @@
 //! - [`configure_lbfgs`] — generic helper that applies optional tolerances from [`MLEOptions`].
 //!
 //! These functions only **configure the solver**. They do **not** set the initial
-//! parameter vector or `max_iters`; that is handled by the runner (e.g. [`run_optimizer`])
+//! parameter vector or `max_iters`; that is handled by the runner (e.g. [`run_lbfgs`])
 //! after the problem is wrapped via [`ArgMinAdapter`].
 //!
 //! # Type aliases used here
@@ -23,10 +23,10 @@
 //! # Example
 //! ```ignore
 //! use crate::optimization::loglik_optimizer::{
-//!     loglik_adapter::ArgMinAdapter,
-//!     loglik_traits::{LineSearcher, MLEOptions},
-//!     loglik_builders::{build_optimizer_hager_zhang, build_optimizer_more_thuente},
-//!     loglik_run::run_optimizer,
+//!     adapter::ArgMinAdapter,
+//!     traits::{LineSearcher, MLEOptions},
+//!     builders::{build_optimizer_hager_zhang, build_optimizer_more_thuente},
+//!     run::run_lbfgs,
 //! };
 //!
 //! let problem = ArgMinAdapter::new(&model, &data);
@@ -36,7 +36,7 @@
 //!     LineSearcher::MoreThuente  => build_optimizer_more_thuente(&opts)?,
 //! };
 //!
-//! let outcome = run_optimizer(theta0.clone(), &opts, problem, solver)?;
+//! let outcome = run_lbfgs(theta0, &opts, problem, solver)?;
 //! ```
 //!
 //! # Notes
@@ -65,7 +65,7 @@ use crate::optimization::{
 ///   `opts.tols.tol_cost` are used here.
 ///
 /// # Returns
-/// A configured [`LbfgsHz`] solver ready to be passed to `run_optimizer`.
+/// A configured [`LbfgsHz`] solver ready to be passed to `run_lbfgs`.
 ///
 /// # Errors
 /// Propagates any error returned by `with_tolerance_grad` /
@@ -93,14 +93,14 @@ pub fn build_optimizer_hager_zhang(opts: &MLEOptions) -> OptResult<LbfgsHz> {
 /// `with_tolerance_cost`.
 ///
 /// This function does **not** set an initial parameter vector or `max_iters`;
-/// those are applied later by the runner (`run_optimizer`).
+/// those are applied later by the runner (`run_lbfgs`).
 ///
 /// # Parameters
 /// - `opts`: Optimizer options. Only `opts.tols.tol_grad` and
 ///   `opts.tols.tol_cost` are used here.
 ///
 /// # Returns
-/// A configured [`LbfgsMt`] solver ready to be passed to `run_optimizer`.
+/// A configured [`LbfgsMt`] solver ready to be passed to `run_lbfgs`.
 ///
 /// # Errors
 /// Propagates any error returned by `with_tolerance_grad` /

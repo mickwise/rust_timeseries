@@ -129,6 +129,42 @@ impl<'a> WorkSpace<'a> {
         self.omega / (1.0 - sum_alpha - sum_beta)
     }
 
+    /// Compute the Jacobian–vector product of the softmax transform for α/β logits.
+    ///
+    /// Expects `theta.len() == q + p`, corresponding to `[α logits, β logits]`.
+    /// Given current softmax weights `(α, β)` and their logits in `theta`, this
+    /// routine overwrites `theta` in place with the partial derivatives
+    /// ∂(α,β)/∂logits multiplied by the logits themselves.
+    ///
+    /// Concretely:
+    /// - Let `num = α·θ[0..q] + β·θ[q..q+p]`.
+    /// - Let `c = num / (1 − STATIONARITY_MARGIN)`.
+    /// - For each `i in 0..q`, write:
+    ///   `θ[i] = α[i] * (θ[i] − c)`.
+    /// - For each `j in 0..p`, write:
+    ///   `θ[q+j] = β[j] * (θ[q+j] − c)`.
+    ///
+    /// This corresponds to the row-wise structure of the softmax Jacobian:
+    /// `∂π_i/∂logit_k = π_i (δ_{ik} − π_k)`, scaled by `(1 − STATIONARITY_MARGIN)`.
+    ///
+    /// # Side effects
+    /// - Mutates the provided `theta` slice in place with the derivative values.
+    /// - No heap allocations.
+    pub fn safe_softmax_deriv(&self, theta: &mut ArrayViewMut1<f64>, p: usize, q: usize) -> () {
+        let alpha = &self.alpha;
+        let beta = &self.beta;
+        let alpha_slice = &theta.slice(s![0..q]);
+        let beta_slice = &theta.slice(s![q..q + p]);
+        let numerator = alpha.dot(alpha_slice) + beta.dot(beta_slice);
+        let c = numerator / (1.0 - STATIONARITY_MARGIN);
+        for i in 0..q {
+            theta[i] = alpha[i] * (theta[i] - c);
+        }
+        for j in 0..p {
+            theta[q + j] = beta[j] * (theta[q + j] - c);
+        }
+    }
+
     /// Fill α and β from the logits slice using a three-pass, max-shift softmax.
     ///
     /// Expects `theta.len() == q + p`, corresponding to `[α logits, β logits]`.

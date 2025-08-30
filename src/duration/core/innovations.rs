@@ -180,4 +180,18 @@ impl ACDInnovation {
             }
         }
     }
+
+    pub fn one_d_loglik_grad(&self, x: f64, psi: f64) -> ACDResult<f64> {
+        validate_loglik_params(x, psi)?;
+        let eps = x / psi;
+        match self {
+            ACDInnovation::Exponential => Ok(eps / psi - 1.0 / psi),
+            ACDInnovation::Weibull { lambda, k } => {
+                Ok((k * ((k * (eps.ln() - lambda.ln())).exp() - 1.0)) / psi)
+            }
+            ACDInnovation::GeneralizedGamma { a, d, p } => {
+                Ok(p * ((p * (eps.ln() - a.ln())).exp() - d) / psi)
+            }
+        }
+    }
 }

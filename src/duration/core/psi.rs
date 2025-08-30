@@ -23,12 +23,15 @@
 //! - `alpha.len() == q` (duration lags), `beta.len() == p` (ψ lags).
 //! - Duration buffer convention: index `0` = oldest pre-sample lag,
 //!   index `q−1` = most recent pre-sample lag.
-use crate::duration::{
-    core::{data::ACDData, init::Init, workspace::WorkSpace},
-    errors::ACDResult,
-    models::acd::ACDModel,
+use crate::{
+    duration::{
+        core::{data::ACDData, init::Init, workspace::WorkSpace},
+        errors::ACDResult,
+        models::acd::ACDModel,
+    },
+    optimization::numerical_stability::transformations::STATIONARITY_MARGIN,
 };
-use ndarray::s;
+use ndarray::{Axis, s};
 
 /// Compute the conditional-mean series ψ **in place** for an ACD(p, q) model.
 ///
@@ -107,12 +110,39 @@ pub fn likelihood_driver(
         None => duration_data.data.view(),
     };
     compute_psi(workspace, duration_data, model_spec);
-    let binding = model_spec.psi_buf.borrow();
+    let binding = model_spec.scratch_bufs.psi_buf.borrow();
     let psi_view = binding.slice(s![start_idx..]);
     duration_series
         .iter()
         .zip(psi_view.iter())
         .try_fold(0.0, |acc, (x, psi)| Ok(acc + model_spec.innovation.log_pdf_duration(*x, *psi)?))
+}
+
+/// Top-level driver for ACD(p, q) ψ–derivative recursion.
+///
+/// Computes ∂ψ_t/∂θ for all `t = 0..n-1` (with θ = (ω, α₁..α_q, β₁..β_p)),
+/// filling the `model_spec.deriv_buf` matrix of shape `(n+p, 1+q+p)`.
+///
+/// Procedure:
+/// 1. `extract_init_derivative` seeds the first `p` rows with the
+///    derivatives of the initial ψ–lags (ψ_{-1}, …, ψ_{-p}) according
+///    to the chosen initialization scheme (`Init::UncondMean`, `SampleMean`,
+///    or `Fixed*`).
+/// 2. `recursion_loop_derivative` propagates these through the sample
+///    durations, updating rows `p..p+n-1` by applying the ACD recursion
+///    with both static contributions (ω, α·lags, β·lags) and recursive
+///    sensitivity (β feedback).
+///
+/// # Side effects
+/// - Overwrites the entire `model_spec.deriv_buf` with derivative rows.
+/// - Reads from `duration_data.data`, `model_spec.scratch_bufs.dur_buf`
+///   and `psi_buf`. No heap allocations.
+pub fn compute_derivative(
+    params: &WorkSpace, duration_data: &ACDData, model_spec: &ACDModel,
+) -> () {
+    let p = model_spec.shape.p;
+    extract_init_derivative(model_spec, &model_spec.options.init, params, p);
+    recursion_loop_derivative(model_spec, duration_data, params, duration_data.data.len());
 }
 
 // ---- Helper Methods ----
@@ -142,9 +172,9 @@ pub fn likelihood_driver(
 fn extract_init(
     model_spec: &ACDModel, init_specs: &Init, uncond_mean: f64, sample_mean: f64, p: usize,
 ) -> () {
-    let mut binding = model_spec.psi_buf.borrow_mut();
+    let mut binding = model_spec.scratch_bufs.psi_buf.borrow_mut();
     let mut init_psi_buf = binding.slice_mut(s![..p]);
-    let mut init_dur_buf = model_spec.dur_buf.borrow_mut();
+    let mut init_dur_buf = model_spec.scratch_bufs.dur_buf.borrow_mut();
     match init_specs {
         Init::UncondMean => {
             init_psi_buf.fill(uncond_mean);
@@ -161,6 +191,42 @@ fn extract_init(
         Init::FixedVector { psi_lags, duration_lags } => {
             init_psi_buf.assign(&psi_lags.view());
             init_dur_buf.assign(&duration_lags.view());
+        }
+    }
+}
+
+/// Seed ACD(p, q) ψ–derivative buffer with initial lag rows.
+///
+/// Fills the first `p` rows of `model_spec.deriv_buf` with the derivatives
+/// of the initial ψ–lags (ψ_{-1}, …, ψ_{-p}) w.r.t. θ = (ω, α₁..α_q, β₁..β_p).
+///
+/// Behavior by init spec:
+/// - `Init::UncondMean`: each initial ψ–lag equals μ = ω / (1 − Σα − Σβ).
+///   The derivative rows are filled with:
+///     - ∂μ/∂ω   = 1 / (1 − Σα − Σβ)
+///     - ∂μ/∂αᵢ  = ∂μ/∂βⱼ = ω / (1 − Σα − Σβ)²
+///   All `p` rows are identical copies of this vector.
+/// - `Init::SampleMean` or any `Init::Fixed*`: initial ψ–lags do not depend
+///   on θ, so the corresponding derivative rows are zeroed.
+///
+/// # Side effects
+/// - Writes into `model_spec.deriv_buf[..p, ..]`. No heap allocations.
+/// - Overwrites any existing contents of these rows.
+fn extract_init_derivative(
+    model_spec: &ACDModel, init_specs: &Init, params: &WorkSpace, p: usize,
+) -> () {
+    let mut binding = model_spec.scratch_bufs.deriv_buf.borrow_mut();
+    let mut init_psi_deriv_buf = binding.slice_mut(s![..p, ..]);
+    match init_specs {
+        Init::UncondMean => {
+            let denominator = params.slack + STATIONARITY_MARGIN;
+            init_psi_deriv_buf.column_mut(0).fill(1.0 / denominator);
+            init_psi_deriv_buf
+                .slice_mut(s![.., 1..])
+                .fill(params.omega / (denominator * denominator));
+        }
+        _ => {
+            init_psi_deriv_buf.fill(0.0);
         }
     }
 }
@@ -185,7 +251,9 @@ fn extract_init(
 ///
 /// # Guards
 /// - After accumulation, ψ_t is clamped into `model_spec.options.psi_guards`.
-fn recursion_loop(model_spec: &ACDModel, duration_data: &ACDData, params: &WorkSpace, n: usize) {
+fn recursion_loop(
+    model_spec: &ACDModel, duration_data: &ACDData, params: &WorkSpace, n: usize,
+) -> () {
     let p = model_spec.shape.p;
     let q = model_spec.shape.q;
     let psi_guards = model_spec.options.psi_guards;
@@ -193,8 +261,8 @@ fn recursion_loop(model_spec: &ACDModel, duration_data: &ACDData, params: &WorkS
     let alpha = &params.alpha; // len = q
     let beta = &params.beta; // len = p
 
-    let mut psi_buf = model_spec.psi_buf.borrow_mut();
-    let dur_init = model_spec.dur_buf.borrow();
+    let mut psi_buf = model_spec.scratch_bufs.psi_buf.borrow_mut();
+    let dur_init = model_spec.scratch_bufs.dur_buf.borrow();
 
     for t in 0..n {
         // how many init vs observed lags to use
@@ -216,5 +284,66 @@ fn recursion_loop(model_spec: &ACDModel, duration_data: &ACDData, params: &WorkS
             new_psi = psi_guards.max;
         }
         psi_buf[p + t] = new_psi;
+    }
+}
+
+/// Core ACD(p, q) ψ–derivative recursion (allocation-free).
+///
+/// Updates `model_spec.deriv_buf[p + t, ..]` for `t = 0..n-1` with the
+/// gradient row ∂ψ_t/∂θ, where θ = (ω, α₁..α_q, β₁..β_p).
+///
+/// Recursion:
+///   ∂ψ_t/∂θ = e_ω
+///           + [τ_{t-1}, …, τ_{t-q}] placed in α–columns
+///           + [ψ_{t-1}, …, ψ_{t-p}] placed in β–columns
+///           + Σ_{j=1}^p β_j · ∂ψ_{t-j}/∂θ
+///
+/// Duration lags are built per step with **one conditional split**:
+/// - `k_init = max(0, q − t)` — lags still coming from the init buffer
+/// - `k_data = q − k_init`    — lags coming from observed data
+///
+/// Convention:
+/// - `dur_buf[0] = τ_{-q}` (oldest) … `dur_buf[q-1] = τ_{-1}` (newest).
+/// - For the α block, both init and data tails are read **reversed**
+///   (newest → oldest) to align with `[τ_{t-1}, …, τ_{t-q}]`.
+/// - For the β block, the ψ–lags window is `psi_buf[t .. t+p]` which
+///   corresponds to `[ψ_{t-1}, …, ψ_{t-p}]`.
+///
+/// # Side effects
+/// - Writes the derivative vector into `model_spec.deriv_buf[p + t, ..]`.
+/// - Reads ψ–lags from `psi_buf` and previous derivative rows from
+///   `deriv_buf[..p+t, ..]`. No heap allocations.
+///
+/// # Guards
+/// - Each row is zeroed before being filled to prevent stale values.
+fn recursion_loop_derivative(
+    model_spec: &ACDModel, duration_data: &ACDData, params: &WorkSpace, n: usize,
+) -> () {
+    let p = model_spec.shape.p;
+    let q = model_spec.shape.q;
+    let dur_init = model_spec.scratch_bufs.dur_buf.borrow();
+    let psi_buf = model_spec.scratch_bufs.psi_buf.borrow_mut();
+    let beta = &params.beta;
+    for t in 0..n {
+        let mut binding = model_spec.scratch_bufs.deriv_buf.borrow_mut();
+        let deriv_buf = binding.view_mut();
+        let k_init = q.saturating_sub(t);
+        let k_data = q - k_init;
+
+        let (deriv_lags_tail, mut deriv_lags_head) = deriv_buf.split_at(Axis(0), p + t);
+
+        let init_tail_rev = dur_init.slice(s![q - k_init .. q; -1]);
+        let data_tail_rev = duration_data.data.slice(s![t - k_data .. t; -1]);
+
+        let mut curr_row = deriv_lags_head.row_mut(0);
+        curr_row.fill(0.0);
+        curr_row[0] = 1.0;
+        curr_row.slice_mut(s![1..k_init + 1]).assign(&init_tail_rev);
+        curr_row.slice_mut(s![k_init + 1..q + 1]).assign(&data_tail_rev);
+        curr_row.slice_mut(s![q + 1..]).assign(&psi_buf.slice(s![t..t + p]));
+        for j in 1..=p {
+            let curr_beta = beta[j - 1];
+            curr_row.scaled_add(curr_beta, &deriv_lags_tail.row(p + t - j));
+        }
     }
 }

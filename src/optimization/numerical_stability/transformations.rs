@@ -30,6 +30,12 @@
 /// in likelihood evaluation.
 pub const STATIONARITY_MARGIN: f64 = 1e-6;
 
+/// Lower clamp used in logit/softmax transforms.
+///
+/// Prevents log/exp underflow when converting extremely small probabilities or
+/// weights during the optimizer-space ↔ model-space mapping.
+pub const LOGIT_EPS: f64 = 1e-15;
+
 /// Numerically stable softplus: `softplus(x) = ln(1 + exp(x))`.
 ///
 /// Computes softplus without overflow for large positive `x` and
@@ -71,4 +77,32 @@ pub fn safe_softplus(x: f64) -> f64 {
 /// - `t` such that `softplus(t) = x`.
 pub fn safe_softplus_inv(x: f64) -> f64 {
     if x > 20.0 { x } else { x.exp_m1().ln() }
+}
+
+/// Numerically stable logistic function: derivative of softplus.
+///
+/// Computes `σ(x) = 1 / (1 + exp(-x))` with guarded branches to avoid
+/// overflow/underflow:
+///
+/// - For `x >> 0`, `σ(x) → 1`. Direct evaluation of `exp(-x)` underflows,
+///   so we return `1.0` immediately when `x > 20.0`.
+/// - For `x ≥ 0`, evaluates `1 / (1 + exp(-x))` safely.
+/// - For `x < 0`, uses the equivalent form `exp(x) / (1 + exp(x))`
+///   to avoid overflow in `exp(-x)`.
+///
+/// # Parameters
+/// - `x`: real-valued input, must be finite.
+///
+/// # Returns
+/// - `σ(x)` in `(0, 1)`, the logistic value.
+pub fn safe_logistic(x: f64) -> f64 {
+    if x > 20.0 {
+        return 1.0;
+    } else if x >= 0.0 {
+        let exp_neg_x = (-x).exp();
+        1.0 / (1.0 + exp_neg_x)
+    } else {
+        let exp_x = x.exp();
+        exp_x / (1.0 + exp_x)
+    }
 }

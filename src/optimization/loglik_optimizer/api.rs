@@ -27,8 +27,7 @@ use crate::optimization::{
 ///
 /// # Parameters
 /// - `f`: Your model implementing [`LogLikelihood`].
-/// - `theta0`: Initial parameter vector. It is **not** consumed; it is cloned
-///   internally so callers can keep their copy.
+/// - `theta0`: Initial parameter vector.
 /// - `data`: Model data passed through to `value`/`grad`.
 /// - `opts`: Optimizer options (tolerances, line search choice, verbosity, etc.).
 ///
@@ -75,18 +74,18 @@ use crate::optimization::{
 /// # Ok::<(), your_crate::optimization::opt_errors::OptError>(())
 /// ```
 pub fn maximize<F: LogLikelihood>(
-    f: &F, theta0: &Theta, data: &F::Data, opts: &MLEOptions,
+    f: &F, theta0: Theta, data: &F::Data, opts: &MLEOptions,
 ) -> OptResult<OptimOutcome> {
-    f.check(theta0, data)?;
+    f.check(&theta0, data)?;
     let problem = ArgMinAdapter::new(f, data);
     match opts.line_searcher {
         LineSearcher::MoreThuente => {
             let solver = build_optimizer_more_thuente(opts)?;
-            run_lbfgs(theta0.clone(), opts, problem, solver)
+            run_lbfgs(theta0, opts, problem, solver)
         }
         LineSearcher::HagerZhang => {
             let solver = build_optimizer_hager_zhang(opts)?;
-            run_lbfgs(theta0.clone(), opts, problem, solver)
+            run_lbfgs(theta0, opts, problem, solver)
         }
     }
 }

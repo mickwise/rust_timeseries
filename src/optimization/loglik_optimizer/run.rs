@@ -34,9 +34,9 @@ use argmin_math::ArgminL2Norm;
 /// - `opts`: Optimizer options (tolerances, verbosity, max iters, etc.).
 /// - `problem`: An [`ArgMinAdapter`] wrapping the user’s model and data.
 /// - `solver`: A fully constructed solver (e.g. from
-///   [`build_optimizer_hager_zhang`](crate::optimization::loglik_optimizer::loglik_builders::build_optimizer_hager_zhang)
+///   [`build_optimizer_hager_zhang`](crate::optimization::loglik_optimizer::builders::build_optimizer_hager_zhang)
 ///   or
-///   [`build_optimizer_more_thuente`](crate::optimization::loglik_optimizer::loglik_builders::build_optimizer_more_thuente)).
+///   [`build_optimizer_more_thuente`](crate::optimization::loglik_optimizer::builders::build_optimizer_more_thuente)).
 ///
 /// # Feature flags
 /// If the `obs_slog` feature is enabled and `opts.verbose == true`, a terminal
@@ -59,7 +59,7 @@ use argmin_math::ArgminL2Norm;
 /// ```ignore
 /// let problem = ArgMinAdapter::new(&model, &data);
 /// let solver  = build_optimizer_hager_zhang(&opts)?;
-/// let out     = run_lbfgs(theta0.clone(), &opts, problem, solver)?;
+/// let out     = run_lbfgs(theta0, &opts, problem, solver)?;
 /// println!("done in {} iters, status: {}", out.iterations, out.status);
 /// ```
 pub fn run_lbfgs<'a, F, S>(
@@ -88,10 +88,10 @@ where
         optimizer = optimizer.configure(|state| state.max_iters(max_iter as u64));
     }
 
-    let mut result = optimizer.run()?.state().clone();
+    let mut result = optimizer.run()?.state().to_owned();
     let iterations = result.get_iter();
-    let function_counts = result.get_func_counts().clone();
-    let termination = result.get_termination_status().clone();
+    let function_counts = result.get_func_counts().to_owned();
+    let termination = result.get_termination_status().to_owned();
     let grad = result.take_gradient();
     OptimOutcome::new(
         result.take_best_param(),
@@ -105,6 +105,31 @@ where
 
 // ---- Helper Methods ----
 
+/// Log the initial objective and gradient norm before optimization
+/// (compiled only with the `obs_slog` feature).
+///
+/// Prints a single line to stderr in the form:
+/// `init: ell(theta0) = <value>[, ||grad|| = <norm>]`.
+///
+/// # Arguments
+/// - `theta0`: initial unconstrained parameter vector.
+/// - `problem`: [`ArgMinAdapter`] wrapping the model and data; used to
+///   evaluate the cost and (optionally) the gradient.
+///
+/// # Behavior
+/// - Computes `ℓ(θ₀)` by calling `-problem.cost(theta0)`.
+/// - Attempts `problem.gradient(theta0)`; on success logs `||∇ℓ(θ₀)||`,
+///   otherwise omits the norm (errors are ignored via `.ok()`).
+/// - Emits a single `eprintln!` line; no state is mutated.
+///
+/// # Returns
+/// - `Ok(())` on success.
+///
+/// # Errors
+/// - Propagates any error from `problem.cost(theta0)`.
+///
+/// # Feature flags
+/// - Available only when the `obs_slog` feature is enabled.
 #[cfg(feature = "obs_slog")]
 fn log_initial_state<F>(theta0: &Theta, problem: &ArgMinAdapter<'_, F>) -> OptResult<()>
 where
