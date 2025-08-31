@@ -371,6 +371,7 @@ impl From<ParamError> for OptError {
             ParamError::InvalidThetaInput { index, value } => {
                 OptError::InvalidThetaInput { index, value }
             }
+            _ => OptError::UnknownError,
         }
     }
 }

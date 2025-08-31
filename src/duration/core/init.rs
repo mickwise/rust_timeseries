@@ -15,7 +15,7 @@
 //! - All lag values must be finite and strictly positive.
 //! - Vector lengths must match `p` (ψ) and `q` (durations).
 use crate::duration::{
-    core::validation::{verify_duration_lags, verify_psi_lags},
+    core::validation::{validate_duration_lags, validate_psi_lags},
     errors::{ACDError, ACDResult},
 };
 use ndarray::Array1;
@@ -70,8 +70,8 @@ impl Init {
     pub fn fixed_vector(
         psi_lags: Array1<f64>, duration_lags: Array1<f64>, p: usize, q: usize,
     ) -> ACDResult<Self> {
-        verify_psi_lags(&psi_lags, q)?;
-        verify_duration_lags(&duration_lags, p)?;
+        validate_psi_lags(&psi_lags, q)?;
+        validate_duration_lags(&duration_lags, p)?;
 
         Ok(Init::FixedVector { psi_lags, duration_lags })
     }

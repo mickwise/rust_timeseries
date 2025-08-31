@@ -1,31 +1,32 @@
-//! ψ–recursion for ACD(p, q).
+//! ψ–recursions for ACD(p, q): training and derivatives.
 //!
-//! Computes the conditional mean duration series `ψ_t` for an
-//! Autoregressive Conditional Duration (ACD) model under the
-//! **Engle–Russell / Wikipedia convention**:
+//! Implements the in-sample conditional-mean recursion and the allocation-free
+//! derivative (sensitivity) recursion used for analytic gradients.
 //!
-//! ψ_t = ω + Σ_{i=1..q} α_i · τ_{t−i} + Σ_{j=1..p} β_j · ψ_{t−j},
+//! ## Model convention (Engle–Russell/Wikipedia)
+//! `ψ_t = ω + Σ_{i=1..q} α_i τ_{t−i} + Σ_{j=1..p} β_j ψ_{t−j}`
 //!
-//! where `τ_t` are observed durations, **α multiplies duration lags** (length `q`),
-//! and **β multiplies ψ lags** (length `p`). Parameter validity (positivity and
-//! stationarity) is enforced upstream by `params.rs`.
-//!
-//! What this module does
-//! ---------------------
+//! ## What this module does
 //! - Seeds pre-sample lag buffers from [`Init`] (`UncondMean`, `SampleMean`,
 //!   `Fixed`, or `FixedVector`).
-//! - Runs the full ψ–recursion over the input series **in place**, writing results
-//!   into the model’s internal buffers (no allocations, no trimming).
+//! - Runs the ψ–recursion over the sample **in place**, writing into the model’s
+//!   preallocated buffers (no heap allocations).
+//! - Fills the ∂ψ_t/∂θ matrix allocation-free for use in analytic gradients.
 //! - Clamps each `ψ_t` to `PsiGuards { min, max }` for numerical safety.
 //!
-//! Conventions & edge cases
-//! ------------------------
-//! - `alpha.len() == q` (duration lags), `beta.len() == p` (ψ lags).
-//! - Duration buffer convention: index `0` = oldest pre-sample lag,
-//!   index `q−1` = most recent pre-sample lag.
+//! ## Ordering assumptions
+//! - Duration and ψ lag buffers store the **newest element at the end**.
+//!   Lag windows used inside the recursions are taken as **reversed tails**
+//!   (newest → oldest) to align with `[·_{t−1}, …, ·_{t−k}]`.
+//!
+//! ## Invariants (enforced upstream)
+//! - `ω > 0`; `α, β ≥ 0` elementwise; `sum(α)+sum(β) < 1 − margin`.
+//!
+//! ## Zero-copy design
+//! Inner loops operate on `ndarray` views only; buffers live in `ACDScratch`.
 use crate::{
     duration::{
-        core::{data::ACDData, init::Init, workspace::WorkSpace},
+        core::{data::ACDData, guards::PsiGuards, init::Init, workspace::WorkSpace},
         errors::ACDResult,
         models::acd::ACDModel,
     },
@@ -145,6 +146,25 @@ pub fn compute_derivative(
     recursion_loop_derivative(model_spec, duration_data, params, duration_data.data.len());
 }
 
+/// Clamp a ψ value into `[guards.min, guards.max]`.
+///
+/// Used both in training and forecasting to prevent numerical underflow/overflow
+/// from propagating through the recursion. Returns:
+/// - `guards.min` if `value < guards.min`
+/// - `guards.max` if `value > guards.max`
+/// - `value` otherwise
+pub fn guard_psi(value: f64, guards: &PsiGuards) -> f64 {
+    let min_guard = guards.min;
+    let max_guard = guards.max;
+    if value < min_guard {
+        min_guard
+    } else if value > max_guard {
+        max_guard
+    } else {
+        value
+    }
+}
+
 // ---- Helper Methods ----
 
 /// Seed the pre-sample lag buffers for ψ and durations according to [`Init`].
@@ -256,10 +276,10 @@ fn recursion_loop(
 ) -> () {
     let p = model_spec.shape.p;
     let q = model_spec.shape.q;
-    let psi_guards = model_spec.options.psi_guards;
+    let psi_guards = &model_spec.options.psi_guards;
     let omega = params.omega;
-    let alpha = &params.alpha; // len = q
-    let beta = &params.beta; // len = p
+    let alpha = &params.alpha;
+    let beta = &params.beta;
 
     let mut psi_buf = model_spec.scratch_bufs.psi_buf.borrow_mut();
     let dur_init = model_spec.scratch_bufs.dur_buf.borrow();
@@ -278,11 +298,7 @@ fn recursion_loop(
             + alpha.slice(s![k_init..q]).dot(&data_tail_rev);
 
         let mut new_psi = omega + sum_alpha + beta.dot(&psi_lags);
-        if new_psi < psi_guards.min {
-            new_psi = psi_guards.min;
-        } else if new_psi > psi_guards.max {
-            new_psi = psi_guards.max;
-        }
+        new_psi = guard_psi(new_psi, psi_guards);
         psi_buf[p + t] = new_psi;
     }
 }

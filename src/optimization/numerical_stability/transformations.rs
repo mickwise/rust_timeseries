@@ -19,6 +19,7 @@
 //! These transforms are building blocks in optimization and
 //! probabilistic modeling whenever parameters must be kept
 //! strictly positive or constrained away from unstable boundaries.
+use ndarray::{ArrayView1, ArrayViewMut1, Zip, s};
 
 /// Safety margin for strict stationarity in ACD models.
 ///
@@ -77,6 +78,72 @@ pub fn safe_softplus(x: f64) -> f64 {
 /// - `t` such that `softplus(t) = x`.
 pub fn safe_softplus_inv(x: f64) -> f64 {
     if x > 20.0 { x } else { x.exp_m1().ln() }
+}
+
+/// Fill α and β from the logits slice using a three-pass, max-shift softmax.
+///
+/// Expects `theta.len() == q + p`, corresponding to `[α logits, β logits]`.
+/// Performs:
+/// 1) `m = max(theta)`
+/// 2) `den = Σ exp(theta[i] − m)`
+/// 3) Writes:
+///    - `α[i] = exp(theta[i] − m) / den * (1 − STATIONARITY_MARGIN)` for `i in 0..q`
+///    - `β[j] = exp(theta[q + j] − m) / den * (1 − STATIONARITY_MARGIN)` for `j in 0..p`
+///
+/// Implementation is **allocation-free** and uses `ndarray::Zip` to write
+/// directly into the α/β buffers.
+pub fn safe_softmax<'a>(
+    alpha: ArrayViewMut1<'a, f64>, beta: ArrayViewMut1<'a, f64>, theta: &ArrayView1<f64>, p: usize,
+    q: usize,
+) -> () {
+    let max_x = theta.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    let sum_exp_x: f64 = theta.iter().map(|&v| (v - max_x).exp()).sum();
+    let scale = 1.0 - STATIONARITY_MARGIN;
+
+    Zip::from(alpha)
+        .and(&theta.slice(ndarray::s![0..q]))
+        .for_each(|a, &v| *a = ((v - max_x).exp() / sum_exp_x) * scale);
+
+    Zip::from(beta)
+        .and(&theta.slice(ndarray::s![q..q + p]))
+        .for_each(|b, &v| *b = ((v - max_x).exp() / sum_exp_x) * scale);
+}
+
+/// Compute the Jacobian–vector product of the softmax transform for α/β logits.
+///
+/// Expects `theta.len() == q + p`, corresponding to `[α logits, β logits]`.
+/// Given current softmax weights `(α, β)` and their logits in `theta`, this
+/// routine overwrites `theta` in place with the partial derivatives
+/// ∂(α,β)/∂logits multiplied by the logits themselves.
+///
+/// Concretely:
+/// - Let `num = α·θ[0..q] + β·θ[q..q+p]`.
+/// - Let `c = num / (1 − STATIONARITY_MARGIN)`.
+/// - For each `i in 0..q`, write:
+///   `θ[i] = α[i] * (θ[i] − c)`.
+/// - For each `j in 0..p`, write:
+///   `θ[q+j] = β[j] * (θ[q+j] − c)`.
+///
+/// This corresponds to the row-wise structure of the softmax Jacobian:
+/// `∂π_i/∂logit_k = π_i (δ_{ik} − π_k)`, scaled by `(1 − STATIONARITY_MARGIN)`.
+///
+/// # Side effects
+/// - Mutates the provided `theta` slice in place with the derivative values.
+/// - No heap allocations.
+pub fn safe_softmax_deriv(
+    alpha: &ArrayViewMut1<f64>, beta: &ArrayViewMut1<f64>, theta: &mut ArrayViewMut1<f64>,
+    p: usize, q: usize,
+) -> () {
+    let alpha_slice = &theta.slice(s![0..q]);
+    let beta_slice = &theta.slice(s![q..q + p]);
+    let numerator = alpha.dot(alpha_slice) + beta.dot(beta_slice);
+    let c = numerator / (1.0 - STATIONARITY_MARGIN);
+    for i in 0..q {
+        theta[i] = alpha[i] * (theta[i] - c);
+    }
+    for j in 0..p {
+        theta[q + j] = beta[j] * (theta[q + j] - c);
+    }
 }
 
 /// Numerically stable logistic function: derivative of softplus.

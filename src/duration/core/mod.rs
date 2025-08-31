@@ -1,4 +1,5 @@
 pub mod data;
+pub mod forecasts;
 pub mod guards;
 pub mod init;
 pub mod innovations;

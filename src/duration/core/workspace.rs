@@ -37,7 +37,9 @@ use crate::{
         },
         errors::{ParamError, ParamResult},
     },
-    optimization::numerical_stability::transformations::{STATIONARITY_MARGIN, safe_softplus},
+    optimization::numerical_stability::transformations::{
+        STATIONARITY_MARGIN, safe_softmax, safe_softplus,
+    },
 };
 use ndarray::{ArrayView1, ArrayViewMut1, s};
 
@@ -71,7 +73,7 @@ impl<'a> WorkSpace<'a> {
     pub fn new(
         alpha: ArrayViewMut1<'a, f64>, beta: ArrayViewMut1<'a, f64>, shape: &ACDShape,
     ) -> ParamResult<Self> {
-        validate_alpha_beta_lengths(&alpha.view(), &beta.view(), shape.q, shape.p)?;
+        validate_alpha_beta_lengths(alpha.view(), beta.view(), shape.q, shape.p)?;
         Ok(WorkSpace { alpha, beta, omega: 0.0, slack: 0.0 })
     }
 
@@ -109,11 +111,11 @@ impl<'a> WorkSpace<'a> {
         let omega = safe_softplus(theta[0]);
         validate_omega(omega)?;
         self.omega = omega;
-        self.safe_softmax(&theta.slice(s![1..]), p, q);
+        safe_softmax(self.alpha.view_mut(), self.beta.view_mut(), &theta.slice(s![1..]), p, q);
         validate_alpha(self.alpha.view(), q)?;
         validate_beta(self.beta.view(), p)?;
         self.slack = 1.0 - STATIONARITY_MARGIN - self.alpha.sum() - self.beta.sum();
-        validate_stationarity_and_slack(&self.alpha.view(), &self.beta.view(), self.slack)?;
+        validate_stationarity_and_slack(self.alpha.view(), self.beta.view(), self.slack)?;
         Ok(())
     }
 
@@ -127,69 +129,5 @@ impl<'a> WorkSpace<'a> {
         let sum_alpha = self.alpha.sum();
         let sum_beta = self.beta.sum();
         self.omega / (1.0 - sum_alpha - sum_beta)
-    }
-
-    /// Compute the Jacobian–vector product of the softmax transform for α/β logits.
-    ///
-    /// Expects `theta.len() == q + p`, corresponding to `[α logits, β logits]`.
-    /// Given current softmax weights `(α, β)` and their logits in `theta`, this
-    /// routine overwrites `theta` in place with the partial derivatives
-    /// ∂(α,β)/∂logits multiplied by the logits themselves.
-    ///
-    /// Concretely:
-    /// - Let `num = α·θ[0..q] + β·θ[q..q+p]`.
-    /// - Let `c = num / (1 − STATIONARITY_MARGIN)`.
-    /// - For each `i in 0..q`, write:
-    ///   `θ[i] = α[i] * (θ[i] − c)`.
-    /// - For each `j in 0..p`, write:
-    ///   `θ[q+j] = β[j] * (θ[q+j] − c)`.
-    ///
-    /// This corresponds to the row-wise structure of the softmax Jacobian:
-    /// `∂π_i/∂logit_k = π_i (δ_{ik} − π_k)`, scaled by `(1 − STATIONARITY_MARGIN)`.
-    ///
-    /// # Side effects
-    /// - Mutates the provided `theta` slice in place with the derivative values.
-    /// - No heap allocations.
-    pub fn safe_softmax_deriv(&self, theta: &mut ArrayViewMut1<f64>, p: usize, q: usize) -> () {
-        let alpha = &self.alpha;
-        let beta = &self.beta;
-        let alpha_slice = &theta.slice(s![0..q]);
-        let beta_slice = &theta.slice(s![q..q + p]);
-        let numerator = alpha.dot(alpha_slice) + beta.dot(beta_slice);
-        let c = numerator / (1.0 - STATIONARITY_MARGIN);
-        for i in 0..q {
-            theta[i] = alpha[i] * (theta[i] - c);
-        }
-        for j in 0..p {
-            theta[q + j] = beta[j] * (theta[q + j] - c);
-        }
-    }
-
-    /// Fill α and β from the logits slice using a three-pass, max-shift softmax.
-    ///
-    /// Expects `theta.len() == q + p`, corresponding to `[α logits, β logits]`.
-    /// Performs:
-    /// 1) `m = max(theta)`
-    /// 2) `den = Σ exp(theta[i] − m)`
-    /// 3) Writes:
-    ///    - `α[i] = exp(theta[i] − m) / den * (1 − STATIONARITY_MARGIN)` for `i in 0..q`
-    ///    - `β[j] = exp(theta[q + j] − m) / den * (1 − STATIONARITY_MARGIN)` for `j in 0..p`
-    ///
-    /// Implementation is **allocation-free** and uses `ndarray::Zip` to write
-    /// directly into the α/β buffers.
-    ///
-    /// This is an internal function; callers should use [`update_workspace`].
-    fn safe_softmax(&mut self, theta: &ArrayView1<f64>, p: usize, q: usize) -> () {
-        let max_x = theta.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-        let sum_exp_x: f64 = theta.iter().map(|&v| (v - max_x).exp()).sum();
-        let scale = 1.0 - STATIONARITY_MARGIN;
-
-        ndarray::Zip::from(self.alpha.view_mut())
-            .and(&theta.slice(ndarray::s![0..q]))
-            .for_each(|a, &v| *a = ((v - max_x).exp() / sum_exp_x) * scale);
-
-        ndarray::Zip::from(self.beta.view_mut())
-            .and(&theta.slice(ndarray::s![q..q + p]))
-            .for_each(|b, &v| *b = ((v - max_x).exp() / sum_exp_x) * scale);
     }
 }

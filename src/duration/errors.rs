@@ -59,7 +59,7 @@ pub enum ACDError {
     InvalidUnitMeanGenGamma { mean: f64 },
 
     /// At least one model shape parameter must be finite and > 0.
-    InvalidModelShape { param: f64 },
+    InvalidModelShape { param: usize, reason: &'static str },
 
     /// Input for log-likelihood must be strictly positive and finite.
     InvalidLogLikInput { value: f64 },
@@ -97,6 +97,9 @@ pub enum ACDError {
     /// Optimizer failed; include a human-readable status/reason.
     OptimizationFailed { status: String },
 
+    /// Model hasn't been fitted yet.
+    ModelNotFitted,
+
     // ---- statsrs distribution errors ----
     /// Wrapper for statrs::distribution::ExpError
     InvalidExpParam,
@@ -107,7 +110,7 @@ pub enum ACDError {
     /// Wrapper for statrs::distribution::WeibullError::ShapeInvalid
     ShapeInvalid,
 
-    /// Catch-all for unhandled statrs::distribution errors.
+    /// ---- Fallback ----
     UnknownError,
 }
 
@@ -116,6 +119,7 @@ impl std::error::Error for ACDError {}
 impl std::fmt::Display for ACDError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            // ---- Input/data validation ----
             ACDError::EmptySeries => {
                 write!(f, "Input series is empty.")
             }
@@ -128,6 +132,7 @@ impl std::fmt::Display for ACDError {
             ACDError::T0OutOfRange { t0, len } => {
                 write!(f, "Burn-in t0 ({t0}) exceeds series length ({len}).")
             }
+            // ---- Model innovations and shape ----
             ACDError::InvalidWeibullParam { param, reason } => {
                 write!(f, "Weibull parameter must be finite and > 0; got: {param}. {reason}")
             }
@@ -143,8 +148,11 @@ impl std::fmt::Display for ACDError {
             ACDError::InvalidUnitMeanGenGamma { mean } => {
                 write!(f, "Generalized Gamma parameters must fulfill unit mean condition: {mean}.")
             }
-            ACDError::InvalidModelShape { param } => {
-                write!(f, "At least one model shape parameter must be finite and > 0; got: {param}")
+            ACDError::InvalidModelShape { param, reason } => {
+                write!(
+                    f,
+                    "At least one model shape parameter must be finite and > 0; got: {param}. {reason}"
+                )
             }
             ACDError::InvalidLogLikInput { value } => {
                 write!(f, "Log-likelihood input must be strictly positive and finite; got: {value}")
@@ -155,6 +163,7 @@ impl std::fmt::Display for ACDError {
                     "Psi value for log-likelihood must be strictly positive and finite; got: {value}"
                 )
             }
+            // ---- Meta / options validation ----
             ACDError::InvalidEpsilonFloor { value } => {
                 write!(f, "epsilon_floor must be finite and > 0; got: {value}")
             }
@@ -188,12 +197,18 @@ impl std::fmt::Display for ACDError {
                     "Init::FixedVector's psi lag values must be finite and > 0; index {index} has value {value}"
                 )
             }
+            // ---- Model/recursion invariants ----
             ACDError::NonFinitePsi { t, value } => {
                 write!(f, "Recursion produced non-finite psi_t at index {t}: {value}")
             }
+            // ---- Estimation / optimizer ----
             ACDError::OptimizationFailed { status } => {
                 write!(f, "Optimizer failed with status: {status}")
             }
+            ACDError::ModelNotFitted => {
+                write!(f, "Model hasn't been fitted yet.")
+            }
+            // ---- statsrs distribution errors ----
             ACDError::InvalidExpParam => {
                 write!(f, "Exponential distribution requires rate > 0.")
             }
@@ -267,6 +282,16 @@ pub enum ParamError {
 
     /// Unconstrained optimization input must have finite values.
     InvalidThetaInput { index: usize, value: f64 },
+
+    // ---- ACDError ----
+    /// Psi length mismatch for ACDParams.
+    InvalidPsiLength { expected: usize, actual: usize },
+
+    /// Psi lags must be finite and > 0.
+    InvalidPsiLags { index: usize, value: f64 },
+
+    /// ---- Fallback ----
+    UnknownError,
 }
 
 impl std::error::Error for ParamError {}
@@ -310,6 +335,15 @@ impl std::fmt::Display for ParamError {
             ParamError::InvalidThetaInput { index, value } => {
                 write!(f, "Theta input at index {index} must be finite, got {value}")
             }
+            ParamError::InvalidPsiLength { expected, actual } => {
+                write!(f, "Psi length mismatch: expected {expected}, got {actual}")
+            }
+            ParamError::InvalidPsiLags { index, value } => {
+                write!(f, "Psi lag at index {index} must be finite and > 0, got {value}")
+            }
+            ParamError::UnknownError => {
+                write!(f, "An unknown error occurred in parameter validation.")
+            }
         }
     }
 }
@@ -318,5 +352,19 @@ impl std::fmt::Display for ParamError {
 impl std::convert::From<ParamError> for PyErr {
     fn from(err: ParamError) -> PyErr {
         PyValueError::new_err(err.to_string())
+    }
+}
+
+impl From<ACDError> for ParamError {
+    fn from(err: ACDError) -> ParamError {
+        match err {
+            ACDError::InvalidPsiLength { expected, actual } => {
+                ParamError::InvalidPsiLength { expected, actual }
+            }
+            ACDError::InvalidPsiLags { index, value } => {
+                ParamError::InvalidPsiLags { index, value }
+            }
+            _ => Self::UnknownError,
+        }
     }
 }

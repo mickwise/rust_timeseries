@@ -19,7 +19,7 @@
 //! - Unit-mean checks use a small tolerance (`1e-10`).
 //! - Log-gamma functions are used internally for numerical stability.
 use crate::duration::{
-    core::validation::{validate_loglik_params, verify_gamma_param, verify_weibull_param},
+    core::validation::{validate_gamma_param, validate_loglik_params, validate_weibull_param},
     errors::{ACDError, ACDResult},
 };
 use statrs::{
@@ -68,7 +68,7 @@ impl ACDInnovation {
     /// # Errors
     /// Returns [`ACDError::InvalidWeibullParam`] if `k` is not finite or ≤ 0.
     pub fn weibull(k: f64) -> ACDResult<Self> {
-        let k = verify_weibull_param(k)?;
+        let k = validate_weibull_param(k)?;
         let lambda = (-gamma::ln_gamma(1.0 + 1.0 / k)).exp();
         Ok(ACDInnovation::Weibull { lambda, k })
     }
@@ -82,8 +82,8 @@ impl ACDInnovation {
     /// - [`ACDError::InvalidWeibullParam`] if `λ` or `k` are invalid.
     /// - [`ACDError::InvalidUnitMeanWeibull`] if the mean deviates from 1 beyond tolerance.
     pub fn weibull_with_lambda(lambda: f64, k: f64) -> ACDResult<Self> {
-        let k = verify_weibull_param(k)?;
-        let mut lambda = verify_weibull_param(lambda)?;
+        let k = validate_weibull_param(k)?;
+        let mut lambda = validate_weibull_param(lambda)?;
         let uncond_mean = lambda * gamma::ln_gamma(1.0 + 1.0 / k).exp();
         if (uncond_mean - 1.0).abs() > UNIT_MEAN_TOL {
             return Err(ACDError::InvalidUnitMeanWeibull { mean: uncond_mean });
@@ -101,8 +101,8 @@ impl ACDInnovation {
     /// # Errors
     /// Returns [`ACDError::InvalidGenGammaParam`] if `p` or `d` are invalid.
     pub fn generalized_gamma(p: f64, d: f64) -> ACDResult<Self> {
-        let p = verify_gamma_param(p)?;
-        let d = verify_gamma_param(d)?;
+        let p = validate_gamma_param(p)?;
+        let d = validate_gamma_param(d)?;
         let a = (gamma::ln_gamma(d / p) - gamma::ln_gamma((d + 1.0) / p)).exp();
         Ok(ACDInnovation::GeneralizedGamma { a, d, p })
     }
@@ -116,9 +116,9 @@ impl ACDInnovation {
     /// - [`ACDError::InvalidGenGammaParam`] if any parameter is invalid.
     /// - [`ACDError::InvalidUnitMeanGenGamma`] if the mean deviates from 1 beyond tolerance.
     pub fn generalized_gamma_with_a(a: f64, p: f64, d: f64) -> ACDResult<Self> {
-        let mut a = verify_gamma_param(a)?;
-        let p = verify_gamma_param(p)?;
-        let d = verify_gamma_param(d)?;
+        let mut a = validate_gamma_param(a)?;
+        let p = validate_gamma_param(p)?;
+        let d = validate_gamma_param(d)?;
         let uncond_mean = (a.ln() + gamma::ln_gamma((d + 1.0) / p) - gamma::ln_gamma(d / p)).exp();
         if (uncond_mean - 1.0).abs() > UNIT_MEAN_TOL {
             return Err(ACDError::InvalidUnitMeanGenGamma { mean: uncond_mean });

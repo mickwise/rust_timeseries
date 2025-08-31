@@ -24,7 +24,7 @@ use ndarray::{Array1, ArrayView1};
 ///
 /// # Errors
 /// Returns [`ACDError::InvalidWeibullParam`] with a descriptive reason on failure.
-pub fn verify_weibull_param(param: f64) -> ACDResult<f64> {
+pub fn validate_weibull_param(param: f64) -> ACDResult<f64> {
     if !param.is_finite() {
         return Err(ACDError::InvalidWeibullParam {
             param,
@@ -46,7 +46,7 @@ pub fn verify_weibull_param(param: f64) -> ACDResult<f64> {
 ///
 /// # Errors
 /// Returns [`ACDError::InvalidGenGammaParam`] with a descriptive reason on failure.
-pub fn verify_gamma_param(param: f64) -> ACDResult<f64> {
+pub fn validate_gamma_param(param: f64) -> ACDResult<f64> {
     if !param.is_finite() {
         return Err(ACDError::InvalidGenGammaParam {
             param,
@@ -69,7 +69,7 @@ pub fn verify_gamma_param(param: f64) -> ACDResult<f64> {
 /// # Errors
 /// - [`ACDError::InvalidDurationLength`] on length mismatch,
 /// - [`ACDError::InvalidDurationLags`] if any element is non-finite or ≤ 0.
-pub fn verify_duration_lags(duration_lags: &Array1<f64>, q: usize) -> ACDResult<()> {
+pub fn validate_duration_lags(duration_lags: &Array1<f64>, q: usize) -> ACDResult<()> {
     if duration_lags.len() != q {
         return Err(ACDError::InvalidDurationLength { expected: q, actual: duration_lags.len() });
     }
@@ -88,7 +88,7 @@ pub fn verify_duration_lags(duration_lags: &Array1<f64>, q: usize) -> ACDResult<
 /// # Errors
 /// - [`ACDError::InvalidPsiLength`] on length mismatch,
 /// - [`ACDError::InvalidPsiLags`] if any element is non-finite or ≤ 0.
-pub fn verify_psi_lags(psi_lags: &Array1<f64>, p: usize) -> ACDResult<()> {
+pub fn validate_psi_lags(psi_lags: &Array1<f64>, p: usize) -> ACDResult<()> {
     if psi_lags.len() != p {
         return Err(ACDError::InvalidPsiLength { expected: p, actual: psi_lags.len() });
     }
@@ -154,7 +154,7 @@ pub fn validate_beta(beta: ArrayView1<f64>, p: usize) -> ParamResult<()> {
 /// - [`ParamError::AlphaLengthMismatch`] if `len(α) != q`
 /// - [`ParamError::BetaLengthMismatch`] if `len(β) != p`
 pub fn validate_alpha_beta_lengths(
-    alpha: &ArrayView1<f64>, beta: &ArrayView1<f64>, q: usize, p: usize,
+    alpha: ArrayView1<f64>, beta: ArrayView1<f64>, q: usize, p: usize,
 ) -> ParamResult<()> {
     if alpha.len() != q {
         return Err(ParamError::AlphaLengthMismatch { expected: q, actual: alpha.len() });
@@ -175,7 +175,7 @@ pub fn validate_alpha_beta_lengths(
 /// - [`ParamError::InvalidSlack`] if `slack` is negative or non-finite,
 /// - [`ParamError::StationarityViolated`] if the equality is violated.
 pub fn validate_stationarity_and_slack(
-    alpha: &ArrayView1<f64>, beta: &ArrayView1<f64>, slack: f64,
+    alpha: ArrayView1<f64>, beta: ArrayView1<f64>, slack: f64,
 ) -> ParamResult<()> {
     if !(slack >= 0.0 && slack.is_finite()) {
         return Err(ParamError::InvalidSlack { value: slack });
