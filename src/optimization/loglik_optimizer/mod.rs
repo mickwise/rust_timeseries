@@ -42,6 +42,7 @@
 pub mod adapter;
 pub mod api;
 pub mod builders;
+pub mod finite_diff;
 pub mod run;
 pub mod traits;
 pub mod types;

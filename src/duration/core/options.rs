@@ -41,10 +41,6 @@ pub struct ACDOptions {
     pub mle_opts: MLEOptions,
     /// Bounds for ψ during recursion to prevent divergence.
     pub psi_guards: PsiGuards,
-    /// Request normalized residuals in outputs (if supported).
-    pub return_norm_resid: bool,
-    /// Request Hessian/observed information (if supported).
-    pub compute_hessian: bool,
 }
 
 impl ACDOptions {
@@ -53,10 +49,7 @@ impl ACDOptions {
     /// Assumes its arguments were already validated by their respective builders
     /// (e.g., [`Init`], [`MLEOptions`], [`PsiGuards`]). No additional cross-field
     /// checks are performed here.
-    pub fn new(
-        init: Init, mle_opts: MLEOptions, psi_guards: PsiGuards, return_norm_resid: bool,
-        compute_hessian: bool,
-    ) -> ACDOptions {
-        ACDOptions { init, mle_opts, psi_guards, return_norm_resid, compute_hessian }
+    pub fn new(init: Init, mle_opts: MLEOptions, psi_guards: PsiGuards) -> ACDOptions {
+        ACDOptions { init, mle_opts, psi_guards }
     }
 }

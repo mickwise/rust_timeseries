@@ -17,7 +17,7 @@
 //! to debug.
 use crate::optimization::{
     errors::{OptError, OptResult},
-    loglik_optimizer::{Grad, Theta},
+    loglik_optimizer::{Grad, Theta, types::Hessian},
 };
 
 /// Validate the optional gradient‐norm tolerance.
@@ -121,6 +121,38 @@ pub fn validate_theta_hat(theta_hat: Option<Theta>) -> OptResult<Theta> {
 pub fn validate_value(value: f64) -> OptResult<()> {
     if !value.is_finite() {
         return Err(OptError::NonFiniteCost { value });
+    }
+    Ok(())
+}
+
+/// Validate the shape and entries of a Hessian matrix.
+///
+/// # Checks
+/// 1. Matrix dimensions must equal `dim × dim`.
+/// 2. All entries must be finite (no NaN or ±∞).
+///
+/// # Arguments
+/// - `hessian`: Hessian matrix to validate.
+/// - `dim`: expected dimension (both rows and columns).
+///
+/// # Returns
+/// - `Ok(())` if the Hessian passes all checks.
+///
+/// # Errors
+/// - [`OptError::HessianDimMismatch`] if dimensions do not match `dim`.
+/// - [`OptError::InvalidHessian`] if any entry is non-finite, with offending
+///   row/col indices and value.
+pub fn validate_hessian(hessian: &Hessian, dim: usize) -> OptResult<()> {
+    if hessian.nrows() != dim || hessian.ncols() != dim {
+        return Err(OptError::HessianDimMismatch {
+            expected: dim,
+            found: (hessian.nrows(), hessian.ncols()),
+        });
+    }
+    for ((i, j), &value) in hessian.indexed_iter() {
+        if !value.is_finite() {
+            return Err(OptError::InvalidHessian { row: i, col: j, value });
+        }
     }
     Ok(())
 }

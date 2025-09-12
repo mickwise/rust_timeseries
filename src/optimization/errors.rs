@@ -111,6 +111,20 @@ pub enum OptError {
         text: String,
     },
 
+    // ---- Finite Diffs ----
+    /// Hessian matrix dimensions do not match parameter dimensions.
+    HessianDimMismatch {
+        expected: usize,
+        found: (usize, usize),
+    },
+
+    /// Hessian values need to be finite.
+    InvalidHessian {
+        row: usize,
+        col: usize,
+        value: f64,
+    },
+
     // ---- ACD Errors ----
     /// Invalid input to log-likelihood function
     InvalidLogLikInput {
@@ -259,6 +273,17 @@ impl std::fmt::Display for OptError {
             }
             OptError::BackendError { text } => {
                 write!(f, "Backend error: {text}")
+            }
+
+            // ---- Finite Diffs ----
+            OptError::HessianDimMismatch { expected, found } => {
+                write!(
+                    f,
+                    "Hessian dimension mismatch: expected ({expected}, {expected}), found {found:?}"
+                )
+            }
+            OptError::InvalidHessian { row, col, value } => {
+                write!(f, "Invalid Hessian at ({row}, {col}): {value}, must be finite")
             }
 
             // ---- ACD Errors ----

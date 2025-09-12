@@ -30,6 +30,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 pub mod duration;
+pub mod inference;
 pub mod optimization;
 pub mod statistical_tests;
 pub mod utils;

@@ -13,6 +13,7 @@
 //!   observations are skipped when evaluating the log-likelihood.
 //! - Optimizer/backend errors are normalized to
 //!   [`ACDError::OptimizationFailed`] with a human-readable status.
+use crate::optimization::errors::OptError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use statrs::distribution::{ExpError, WeibullError};
@@ -109,6 +110,20 @@ pub enum ACDError {
 
     /// Wrapper for statrs::distribution::WeibullError::ShapeInvalid
     ShapeInvalid,
+
+    // ---- ParamError ----
+    /// Alpha length mismatch for ACDParams.
+    AlphaLengthMismatch { expected: usize, actual: usize },
+
+    /// Beta length mismatch for ACDParams.
+    BetaLengthMismatch { expected: usize, actual: usize },
+
+    // ---- OptError ----
+    /// Hessian matrix dimensions do not match parameter dimensions.
+    HessianDimMismatch { expected: usize, found: (usize, usize) },
+
+    /// Hessian values need to be finite.
+    InvalidHessian { row: usize, col: usize, value: f64 },
 
     /// ---- Fallback ----
     UnknownError,
@@ -221,6 +236,26 @@ impl std::fmt::Display for ACDError {
             ACDError::UnknownError => {
                 write!(f, "An unknown error occurred in the distribution.")
             }
+
+            // ---- ParamError ----
+            ACDError::AlphaLengthMismatch { expected, actual } => {
+                write!(f, "Alpha length mismatch: expected {expected}, got {actual}")
+            }
+            ACDError::BetaLengthMismatch { expected, actual } => {
+                write!(f, "Beta length mismatch: expected {expected}, got {actual}")
+            }
+
+            // ---- OptError ----
+            ACDError::HessianDimMismatch { expected, found } => {
+                write!(
+                    f,
+                    "Hessian dimension mismatch: expected {}x{}, found {}x{}",
+                    expected, expected, found.0, found.1
+                )
+            }
+            ACDError::InvalidHessian { row, col, value } => {
+                write!(f, "Invalid Hessian value at ({}, {}): {}", row, col, value)
+            }
         }
     }
 }
@@ -245,6 +280,34 @@ impl From<WeibullError> for ACDError {
         match err {
             WeibullError::ScaleInvalid => ACDError::ScaleInvalid,
             WeibullError::ShapeInvalid => ACDError::ShapeInvalid,
+            _ => ACDError::UnknownError,
+        }
+    }
+}
+
+impl From<ParamError> for ACDError {
+    fn from(err: ParamError) -> ACDError {
+        match err {
+            ParamError::AlphaLengthMismatch { expected, actual } => {
+                ACDError::AlphaLengthMismatch { expected, actual }
+            }
+            ParamError::BetaLengthMismatch { expected, actual } => {
+                ACDError::BetaLengthMismatch { expected, actual }
+            }
+            _ => ACDError::UnknownError,
+        }
+    }
+}
+
+impl From<OptError> for ACDError {
+    fn from(err: OptError) -> Self {
+        match err {
+            OptError::HessianDimMismatch { expected, found } => {
+                ACDError::HessianDimMismatch { expected, found }
+            }
+            OptError::InvalidHessian { row, col, value } => {
+                ACDError::InvalidHessian { row, col, value }
+            }
             _ => ACDError::UnknownError,
         }
     }

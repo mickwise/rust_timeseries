@@ -7,12 +7,13 @@ use argmin::solver::{
     linesearch::{HagerZhangLineSearch, MoreThuenteLineSearch},
     quasinewton::LBFGS,
 };
-use ndarray::Array1;
+use ndarray::{Array1, Array2};
 use std::collections::HashMap;
 
 // Core numeric types
 pub type Theta = Array1<f64>;
 pub type Grad = Array1<f64>;
+pub type Hessian = Array2<f64>;
 pub type Cost = f64;
 
 // Function-evaluation counts as returned by Argmin

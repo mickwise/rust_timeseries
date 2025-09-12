@@ -5,11 +5,10 @@
 //! provided by the user) are negated accordingly. If a gradient is not
 //! provided, we finite-difference the **cost** closure, so no sign flip is
 //! needed in that branch.
-use std::cell::RefCell;
-
 use crate::optimization::{
     errors::OptError,
     loglik_optimizer::{
+        finite_diff::run_fd_diff,
         traits::LogLikelihood,
         types::{Cost, Grad, Theta},
         validation::validate_grad,
@@ -17,6 +16,7 @@ use crate::optimization::{
 };
 use argmin::core::{CostFunction, Error, Gradient};
 use finitediff::FiniteDiff;
+use std::cell::RefCell;
 
 /// Bridges a user `LogLikelihood` to `argmin`'s `CostFunction` and `Gradient`.
 ///
@@ -125,30 +125,4 @@ impl<'a, F: LogLikelihood> ArgMinAdapter<'a, F> {
     pub fn new(f: &'a F, data: &'a F::Data) -> Self {
         Self { f, data }
     }
-}
-
-/// Compute a forward-difference gradient of `func` at `theta`, with error capture.
-///
-/// The FD closure can’t return `Result`, so any error raised by `func` is
-/// stored into `closure_err` and the closure returns `NaN`. This helper:
-/// - clears `closure_err`,
-/// - performs `forward_diff`,
-/// - if an error was captured, returns it as `Err`,
-/// - validates the resulting gradient,
-/// - if validation succeeds, returns the gradient as `Ok(grad)`.
-///
-/// # Errors
-/// Returns any error captured during evaluation of `func` inside the FD routine
-/// or by validation of the resulting gradient.
-fn run_fd_diff<G: Fn(&Theta) -> f64>(
-    theta: &Theta, func: &G, closure_err: &RefCell<Option<Error>>,
-) -> Result<Grad, Error> {
-    closure_err.replace(None);
-    let fd_grad = theta.forward_diff(func);
-    let dim = theta.len();
-    if let Some(err) = closure_err.take() {
-        return Err(err);
-    }
-    validate_grad(&fd_grad, dim)?;
-    Ok(fd_grad)
 }

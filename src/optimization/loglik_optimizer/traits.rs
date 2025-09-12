@@ -109,17 +109,12 @@ impl FromStr for LineSearcher {
 pub struct MLEOptions {
     pub tols: Tolerances,
     pub line_searcher: LineSearcher,
-    pub verbose: bool,
     pub lbfgs_mem: Option<usize>,
 }
 
 impl MLEOptions {
-    /// Create a new set of optimizer options.
-    ///
-    /// This constructor does not mutate values; validation of numeric fields is
-    /// performed inside [`Tolerances::new`].
     pub fn new(
-        tols: Tolerances, line_searcher: LineSearcher, verbose: bool, lbfgs_mem: Option<usize>,
+        tols: Tolerances, line_searcher: LineSearcher, lbfgs_mem: Option<usize>,
     ) -> OptResult<Self> {
         if let Some(m) = lbfgs_mem {
             if m == 0 {
@@ -129,7 +124,7 @@ impl MLEOptions {
                 });
             }
         }
-        Ok(Self { tols, line_searcher, verbose, lbfgs_mem })
+        Ok(Self { tols, line_searcher, lbfgs_mem })
     }
 }
 
@@ -138,7 +133,6 @@ impl Default for MLEOptions {
         Self {
             tols: Tolerances::new(Some(1e-6), None, Some(300)).unwrap(),
             line_searcher: LineSearcher::MoreThuente,
-            verbose: false,
             lbfgs_mem: None,
         }
     }

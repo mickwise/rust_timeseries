@@ -23,13 +23,15 @@ use crate::{
             innovations::ACDInnovation,
             options::ACDOptions,
             params::{ACDParams, ACDScratch},
-            psi::{compute_derivative, compute_psi, likelihood_driver},
+            psi::{compute_psi, likelihood_driver},
             shape::ACDShape,
             validation::validate_theta,
             workspace::WorkSpace,
         },
         errors::{ACDError, ACDResult},
+        models::model_internals::{ObsEntry, calculate_scores, extract_theta, walk_observations},
     },
+    inference::{HACOptions, calculate_avg_scores, hessian::calc_standard_errors},
     optimization::{
         errors::OptResult,
         loglik_optimizer::{Grad, LogLikelihood, OptimOutcome, Theta, maximize},
@@ -37,6 +39,7 @@ use crate::{
     },
 };
 use ndarray::{Array1, s};
+use std::cell::RefCell;
 
 /// ACD(p, q) model with analytic log-likelihood and gradient.
 ///
@@ -187,6 +190,75 @@ impl ACDModel {
         self.forecast = Some(forecast_result);
         h_forecast
     }
+
+    /// Compute classical or HAC-robust standard errors at the fitted ACD parameters.
+    ///
+    /// This routine builds standard errors for the **unconstrained parameter vector**
+    /// θ = (θ₀, θ₁,…, θ_{p+q}) used by the optimizer. By default it returns
+    /// *classical* (observed-information) SEs; with `HACOptions` it returns *robust*
+    /// (sandwich/HAC) SEs that account for serial correlation and heteroskedasticity
+    /// in the per-observation scores.
+    ///
+    /// ## Method
+    /// - Let J(θ̂) denote the observed information (Hessian of the average
+    ///   log-likelihood at the MLE θ̂). We obtain J(θ̂) by finite-differencing
+    ///   the analytic gradient `self.grad(·, data)`; if configured, the Hessian is
+    ///   regularized per `self.options.mle_opts`.
+    /// - Classical SEs (no HAC):
+    ///   Var(θ̂) ≈ J(θ̂)⁻¹
+    ///   implemented via an eigendecomposition with a Moore–Penrose pseudoinverse
+    ///   if J is singular or nearly singular; tiny eigenvalues are clipped at
+    ///   `EIGEN_EPS`.
+    /// - Robust/HAC SEs: form the covariance of the average score
+    ///   S = Γ₀ + Σ (k=1..L) wₖ (Γₖ + Γₖᵀ)
+    ///   using the kernel and bandwidth in `HACOptions` (with Newey–West small-sample
+    ///   correction if enabled). Then the sandwich variance for component i is
+    ///   Var(θ̂ᵢ) = wᵢᵀ S wᵢ, where wᵢ = J(θ̂)⁺ eᵢ.
+    ///
+    /// ## Arguments
+    /// - `data`: The observed duration series used to compute per-observation scores.
+    /// - `hac_opts`: `None` for classical SEs; `Some(opts)` for robust/HAC SEs.
+    ///   - `opts.kernel`: Bartlett, Parzen, or Quadratic-Spectral (Bartlett ≈ Newey–West).
+    ///   - `opts.bandwidth`: `None` = data-driven plug-in; otherwise clamped to n−1.
+    ///   - `opts.center`: optionally demean scores before HAC (usually unnecessary at the MLE).
+    ///   - `opts.small_sample_correction`: apply NW finite-sample scaling.
+    ///
+    /// ## Returns
+    /// A length-(1 + p + q) vector of standard errors in θ-space (the optimizer’s
+    /// unconstrained parameters).
+    ///
+    /// ## Notes
+    /// - If you want SEs for model-space parameters (ω, α, β, slack), apply a delta-method
+    ///   transform with the Jacobian of your softplus/softmax map.
+    /// - The routine tolerates non–positive-definite Hessians via pseudoinversion; weak
+    ///   identification will inflate SEs (by design).
+    ///
+    /// ## Errors
+    /// - Propagates any runtime error from `self.grad` (captured during FD of the Hessian).
+    /// - Returns an error if the model has not been fitted (no θ̂ available).
+    /// - Robust branch may error if bandwidth plug-in fails and no fallback is allowed.
+    pub fn standard_errors(
+        &self, data: &ACDData, hac_opts: &Option<HACOptions>,
+    ) -> ACDResult<Array1<f64>> {
+        let runtime_error = RefCell::new(None);
+        let theta_hat = extract_theta(self)?;
+        let calc_grad = |th: &Array1<f64>| match self.grad(th, data) {
+            Ok(g) => g,
+            Err(e) => {
+                *runtime_error.borrow_mut() = Some(e);
+                Array1::from_elem(th.len(), f64::NAN)
+            }
+        };
+        match hac_opts {
+            Some(hac) => {
+                let raw_scores = calculate_scores(&self, data)?;
+                let theta_hat = extract_theta(self)?;
+                let avg_scores = calculate_avg_scores(&hac, &raw_scores);
+                Ok(calc_standard_errors(&calc_grad, theta_hat, Some(&avg_scores))?)
+            }
+            None => Ok(calc_standard_errors(&calc_grad, theta_hat, None)?),
+        }
+    }
 }
 
 impl LogLikelihood for ACDModel {
@@ -255,36 +327,38 @@ impl LogLikelihood for ACDModel {
     fn grad(&self, theta: &Theta, data: &Self::Data) -> OptResult<Grad> {
         let p = self.shape.p;
         let q = self.shape.q;
-        let mut workspace_alpha = self.scratch_bufs.alpha_buf.borrow_mut();
-        let mut workspace_beta = self.scratch_bufs.beta_buf.borrow_mut();
-        let mut workspace =
-            WorkSpace::new(workspace_alpha.view_mut(), workspace_beta.view_mut(), &self.shape)?;
-        workspace.update_workspace(theta.view(), &self.shape)?;
-        compute_psi(&workspace, data, &self);
-        compute_derivative(&workspace, data, &self);
-        let deriv_binding = self.scratch_bufs.deriv_buf.borrow();
-        let mut start_idx = p;
-        if data.t0.is_some() {
-            start_idx += data.t0.unwrap();
-        }
-        let psi_derives = deriv_binding.slice(s![start_idx.., ..]);
-        let psi_lags_binding = self.scratch_bufs.psi_buf.borrow();
-        let psi_lags = psi_lags_binding.slice(s![start_idx..]);
-        let mut grad = psi_derives
-            .rows()
-            .into_iter()
-            .zip(data.data.slice(s![start_idx..]).iter())
-            .zip(psi_lags.iter())
-            .try_fold(
-                ndarray::Array1::<f64>::zeros(1 + p + q),
-                |mut acc, ((deriv_row, &x), &psi)| {
-                    let innov_grad = self.innovation.one_d_loglik_grad(x, psi)?;
-                    acc += &(&deriv_row * innov_grad);
-                    Ok::<Array1<f64>, ACDError>(acc)
-                },
-            )?;
-        grad[0] *= safe_logistic(theta[0]);
-        safe_softmax_deriv(&workspace.alpha, &workspace.beta, &mut grad.slice_mut(s![1..]), p, q);
-        Ok(grad)
+        let innov = &self.innovation;
+
+        // Closure to accumulate gradient contributions from each observation
+        let step_accumulate_grad = |row_triplet: ObsEntry<'_>, state: &mut Array1<f64>| {
+            let (_, deriv_row, data_point, psi) = row_triplet;
+            let innov_grad = innov.one_d_loglik_grad(data_point, psi)?;
+            state.scaled_add(innov_grad, &deriv_row);
+            Ok(())
+        };
+
+        let finish_map_grad = |workspace: &WorkSpace, state: &mut Array1<f64>| -> ACDResult<()> {
+            state[0] *= safe_logistic(theta[0]);
+            safe_softmax_deriv(
+                &workspace.alpha,
+                &workspace.beta,
+                &mut state.slice_mut(s![1..]),
+                p,
+                q,
+            );
+            Ok(())
+        };
+
+        let mut state = Array1::zeros(1 + p + q);
+
+        walk_observations(
+            &self,
+            data,
+            theta.view(),
+            &mut state,
+            step_accumulate_grad,
+            finish_map_grad,
+        )?;
+        Ok(state)
     }
 }

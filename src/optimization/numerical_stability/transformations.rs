@@ -37,6 +37,17 @@ pub const STATIONARITY_MARGIN: f64 = 1e-6;
 /// weights during the optimizer-space ↔ model-space mapping.
 pub const LOGIT_EPS: f64 = 1e-15;
 
+/// Eigenvalue threshold for treating tiny/negative curvatures as zero.
+///
+/// Any eigenvalue `λ <= EIGEN_EPS` is considered numerically nonpositive and is
+/// excluded from the variance calculation (equivalently, we use the Moore–Penrose
+/// pseudoinverse along those directions). This makes the covariance positive
+/// semidefinite and conservative under weak identification.
+pub const EIGEN_EPS: f64 = 1e-10;
+
+/// Small clamp to prevent log(0) or division by zero.
+pub const GENERAL_TOL: f64 = 1e-10;
+
 /// Numerically stable softplus: `softplus(x) = ln(1 + exp(x))`.
 ///
 /// Computes softplus without overflow for large positive `x` and
