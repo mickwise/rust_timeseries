@@ -34,7 +34,7 @@ pub mod inference;
 pub mod optimization;
 pub mod statistical_tests;
 pub mod utils;
-use crate::{statistical_tests::escanciano_lobato::ELResult, utils::extract_f64_array};
+use crate::{statistical_tests::escanciano_lobato::ELOutcome, utils::extract_f64_array};
 use numpy::PyReadonlyArray1;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -66,7 +66,7 @@ use pyo3::prelude::*;
 #[pyclass(module = "rust_timeseries.statistical_tests")]
 pub struct EscancianoLobato {
     /// The EL test result struct.
-    inner: ELResult,
+    inner: ELOutcome,
 }
 
 #[pymethods]
@@ -104,7 +104,7 @@ impl EscancianoLobato {
         let d: usize = d.map_or(Ok(default_d), |v| {
             if v > 0 { Ok(v) } else { Err(PyValueError::new_err("d must be positive")) }
         })?;
-        let result = ELResult::escanciano_lobato(data, q, d)?;
+        let result = ELOutcome::escanciano_lobato(data, q, d)?;
         Ok(EscancianoLobato { inner: result })
     }
 

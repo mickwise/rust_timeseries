@@ -51,7 +51,7 @@ pub mod validation;
 // ---- Re-exports ----
 pub use self::api::maximize;
 pub use self::traits::{LogLikelihood, MLEOptions, OptimOutcome, Tolerances};
-pub use self::types::{Cost, FnEvalMap, Grad, LBFGS_MEM, Theta};
+pub use self::types::{Cost, DEFAULT_LBFGS_MEM, FnEvalMap, Grad, Theta};
 
 // Optional convenience prelude for downstream crates:
 // use `loglik_optimizer::prelude::*;`

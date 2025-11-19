@@ -39,7 +39,7 @@ pub mod kernel;
 
 // ---- Re-exports (primary surface) ----
 pub use self::errors::{InferenceError, InferenceResult};
-pub use self::hac::{HACOptions, calculate_avg_scores};
+pub use self::hac::{HACOptions, calculate_avg_scores_cov};
 pub use self::hessian::calc_standard_errors;
 pub use self::kernel::KernelType;
 
@@ -47,7 +47,7 @@ pub use self::kernel::KernelType;
 // use `inference::prelude::*;`
 pub mod prelude {
     pub use super::errors::{InferenceError, InferenceResult};
-    pub use super::hac::{HACOptions, calculate_avg_scores};
+    pub use super::hac::{HACOptions, calculate_avg_scores_cov};
     pub use super::hessian::calc_standard_errors;
     pub use super::kernel::KernelType;
 }
