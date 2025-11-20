@@ -1,12 +1,15 @@
+#[cfg(feature = "python-bindings")]
 use numpy::{
     IntoPyArray,    // Vec → PyArray
     PyArrayMethods, // .readonly()
     PyReadonlyArray1,
 };
+#[cfg(feature = "python-bindings")]
 use pyo3::{prelude::*, types::PyAny};
 
 /// Always returns a *contiguous* `float64` NumPy column vector.
 /// Copies only when contiguity cannot be guaranteed.
+#[cfg(feature = "python-bindings")]
 #[inline]
 pub fn extract_f64_array<'py>(
     py: Python<'py>, raw_data: &Bound<'py, PyAny>,
