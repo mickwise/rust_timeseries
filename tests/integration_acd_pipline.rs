@@ -30,7 +30,7 @@
 //!   are expected to be tested at a higher integration or system level.
 //! - Exhaustive stress testing over extreme sample sizes and parameter
 //!   grids — those belong in targeted performance and property tests.
-use ndarray::{array, Array1};
+use ndarray::{Array1, array};
 use rust_timeseries::{
     duration::{
         core::{
@@ -45,9 +45,8 @@ use rust_timeseries::{
         models::acd::ACDModel,
     },
     inference::{hac::HACOptions, kernel::KernelType},
-    optimization::loglik_optimizer::{traits::LineSearcher, MLEOptions, Tolerances},
+    optimization::loglik_optimizer::{MLEOptions, Tolerances, traits::LineSearcher},
 };
-
 
 /// Purpose
 /// -------
@@ -87,10 +86,8 @@ fn make_trending_data(n: usize, base: f64, slope: f64) -> ACDData {
         if x <= 0.0 { base } else { x }
     }));
     let meta = ACDMeta::new(ACDUnit::Seconds, None, false);
-    ACDData::new(data, None, meta)
-        .expect("ACDData::new should succeed for positive, finite series")
+    ACDData::new(data, None, meta).expect("ACDData::new should succeed for positive, finite series")
 }
-
 
 /// Purpose
 /// -------
@@ -132,7 +129,6 @@ fn default_acd_options() -> ACDOptions {
         .expect("PsiGuards::new should accept positive, finite bounds (min < max)");
     ACDOptions::new(init, mle_opts, psi_guards)
 }
-
 
 /// Purpose
 /// -------
@@ -176,11 +172,10 @@ fn tuned_acd_options() -> ACDOptions {
         .expect("Tolerances::new should accept tighter tolerances");
     let mle_opts = MLEOptions::new(tols, LineSearcher::MoreThuente, Some(5))
         .expect("MLEOptions::new should succeed with explicit L-BFGS memory");
-    let psi_guards = PsiGuards::new((1e-4, 1e3))
-        .expect("PsiGuards::new should accept narrow yet valid bounds");
+    let psi_guards =
+        PsiGuards::new((1e-4, 1e3)).expect("PsiGuards::new should accept narrow yet valid bounds");
     ACDOptions::new(init, mle_opts, psi_guards)
 }
-
 
 /// Purpose
 /// -------
@@ -219,26 +214,17 @@ fn tuned_acd_options() -> ACDOptions {
 ///   around `ACDData` creation, shape validation, model construction,
 ///   and fitting.
 fn fit_acd_model(
-    p: usize,
-    q: usize,
-    n: usize,
-    base: f64,
-    slope: f64,
-    innovation: ACDInnovation,
+    p: usize, q: usize, n: usize, base: f64, slope: f64, innovation: ACDInnovation,
     opts: &ACDOptions,
 ) -> (ACDModel, ACDData, usize) {
     let data = make_trending_data(n, base, slope);
-    let shape = ACDShape::new(p, q, n)
-        .expect("ACDShape::new should accept p, q < n and p + q > 0");
+    let shape = ACDShape::new(p, q, n).expect("ACDShape::new should accept p, q < n and p + q > 0");
     let mut model = ACDModel::new(shape.clone(), innovation, opts.clone(), n);
     let theta_dim = 1 + p + q;
     let theta0 = Array1::from_elem(theta_dim, 0.0);
-    model
-        .fit(theta0, &data)
-        .expect("ACDModel::fit should succeed on synthetic trending data");
+    model.fit(theta0, &data).expect("ACDModel::fit should succeed on synthetic trending data");
     (model, data, theta_dim)
 }
-
 
 #[test]
 // Purpose
@@ -272,10 +258,8 @@ fn acd_api_supports_multiple_shapes_scales_and_innovations() {
     let shapes: &[(usize, usize)] = &[(1, 0), (0, 1), (1, 1), (2, 1)];
     let bases: &[f64] = &[0.5, 1.0, 5.0];
     let slope_factor: f64 = 0.01;
-    let innovations: &[ACDInnovation] = &[
-        ACDInnovation::exponential(),
-        ACDInnovation::weibull(1.5).expect("valid Weibull shape"),
-    ];
+    let innovations: &[ACDInnovation] =
+        &[ACDInnovation::exponential(), ACDInnovation::weibull(1.5).expect("valid Weibull shape")];
     let n = 128;
     let opts = default_acd_options();
     let hac_opts = HACOptions::default(); // Bartlett kernel, plug-in bandwidth, no centering, NW correction
@@ -298,15 +282,13 @@ fn acd_api_supports_multiple_shapes_scales_and_innovations() {
                 assert_eq!(se_hac.len(), theta_dim);
                 assert!(se_hac.iter().all(|v| v.is_finite()));
                 // Forecast should be positive and finite
-                let h_forecast = model
-                    .forecast(5, &data)
-                    .expect("forecast should succeed after fit");
+                let h_forecast =
+                    model.forecast(5, &data).expect("forecast should succeed after fit");
                 assert!(h_forecast.is_finite() && h_forecast > 0.0);
             }
         }
     }
 }
-
 
 #[test]
 // Purpose
@@ -340,36 +322,24 @@ fn hac_standard_errors_differ_from_classical_on_trending_series() {
     let data = make_trending_data(n, 1.0, 0.002);
     let p = 1;
     let q = 1;
-    let shape = ACDShape::new(p, q, n)
-        .expect("ACDShape::new should accept p, q < n and p + q > 0");
+    let shape = ACDShape::new(p, q, n).expect("ACDShape::new should accept p, q < n and p + q > 0");
     let opts = default_acd_options();
     let innovation = ACDInnovation::exponential();
     let mut model = ACDModel::new(shape.clone(), innovation, opts, n);
     let theta_dim = 1 + p + q;
     let theta0 = Array1::from_elem(theta_dim, 0.0);
     model.fit(theta0, &data).expect("fit should succeed");
-    let se_classical = model
-        .standard_errors(&data, None)
-        .expect("classical SEs");
+    let se_classical = model.standard_errors(&data, None).expect("classical SEs");
     let hac_opts = HACOptions::new(None, KernelType::Bartlett, true, true);
-    let se_hac = model
-        .standard_errors(&data, Some(&hac_opts))
-        .expect("HAC SEs");
+    let se_hac = model.standard_errors(&data, Some(&hac_opts)).expect("HAC SEs");
     assert_eq!(se_classical.len(), se_hac.len());
     for v in se_classical.iter().chain(se_hac.iter()) {
         assert!(v.is_finite(), "all SE values should be finite");
     }
     // they should differ
-    let all_equal = se_hac
-        .iter()
-        .zip(se_classical.iter())
-        .all(|(h, c)| (h - c).abs() < 1e-10);
-    assert!(
-        !all_equal,
-        "HAC and classical SEs should differ on trending series"
-    );
+    let all_equal = se_hac.iter().zip(se_classical.iter()).all(|(h, c)| (h - c).abs() < 1e-10);
+    assert!(!all_equal, "HAC and classical SEs should differ on trending series");
 }
-
 
 #[test]
 // Purpose
@@ -406,33 +376,23 @@ fn acd_api_respects_tuned_acdoptions() {
     let p = 1;
     let q = 1;
     let data = make_trending_data(n, 2.5, 0.01);
-    let shape = ACDShape::new(p, q, n)
-        .expect("ACDShape::new should accept p, q < n and p + q > 0");
+    let shape = ACDShape::new(p, q, n).expect("ACDShape::new should accept p, q < n and p + q > 0");
     let opts = tuned_acd_options();
     let innovation = ACDInnovation::weibull(1.3).expect("valid Weibull shape");
     let mut model = ACDModel::new(shape.clone(), innovation, opts, n);
     let theta_dim = 1 + p + q;
     let theta0 = array![0.1, -0.05, 0.02];
-    model
-        .fit(theta0, &data)
-        .expect("fit should succeed with tuned options");
-    let se_classical = model
-        .standard_errors(&data, None)
-        .expect("classical SEs tuned");
+    model.fit(theta0, &data).expect("fit should succeed with tuned options");
+    let se_classical = model.standard_errors(&data, None).expect("classical SEs tuned");
     assert_eq!(se_classical.len(), theta_dim);
     assert!(se_classical.iter().all(|v| v.is_finite() && *v >= 0.0));
     let hac_opts = HACOptions::new(Some(5), KernelType::QuadraticSpectral, false, false);
-    let se_hac = model
-        .standard_errors(&data, Some(&hac_opts))
-        .expect("HAC SEs tuned");
+    let se_hac = model.standard_errors(&data, Some(&hac_opts)).expect("HAC SEs tuned");
     assert_eq!(se_hac.len(), theta_dim);
     assert!(se_hac.iter().all(|v| v.is_finite()));
-    let forecast_val = model
-        .forecast(10, &data)
-        .expect("forecast tuned");
+    let forecast_val = model.forecast(10, &data).expect("forecast tuned");
     assert!(forecast_val.is_finite() && forecast_val > 0.0);
 }
-
 
 // Purpose
 // -------
@@ -455,27 +415,20 @@ fn acd_model_handles_t0_offset() {
     let t0 = Some(50);
     let data_series = Array1::from_iter((0..n).map(|i| 1.0 + 0.01 * (i as f64)));
     let meta = ACDMeta::new(ACDUnit::Seconds, None, false);
-    let data = ACDData::new(data_series, t0, meta)
-        .expect("ACDData::new should accept t0 within range");
+    let data =
+        ACDData::new(data_series, t0, meta).expect("ACDData::new should accept t0 within range");
     let p = 1;
     let q = 1;
-    let shape = ACDShape::new(p, q, n)
-        .expect("ACDShape::new should accept p, q < n and p + q > 0");
+    let shape = ACDShape::new(p, q, n).expect("ACDShape::new should accept p, q < n and p + q > 0");
     let opts = default_acd_options();
     let innovation = ACDInnovation::exponential();
     let mut model = ACDModel::new(shape.clone(), innovation, opts, n);
     let theta_dim = 1 + p + q;
     let theta0 = Array1::from_elem(theta_dim, 0.0);
-    model
-        .fit(theta0, &data)
-        .expect("fit should succeed with t0 > 0");
-    let se_classical = model
-        .standard_errors(&data, None)
-        .expect("classical SEs with t0");
+    model.fit(theta0, &data).expect("fit should succeed with t0 > 0");
+    let se_classical = model.standard_errors(&data, None).expect("classical SEs with t0");
     assert_eq!(se_classical.len(), theta_dim);
     assert!(se_classical.iter().all(|v| v.is_finite() && *v >= 0.0));
-    let forecast_val = model
-        .forecast(3, &data)
-        .expect("forecast with t0");
+    let forecast_val = model.forecast(3, &data).expect("forecast with t0");
     assert!(forecast_val.is_finite() && forecast_val > 0.0);
 }
