@@ -66,9 +66,12 @@
 //!   flows (e.g., fitting or simulation) and assert that domain violations
 //!   are reported via the appropriate `ACDError` variants.
 use crate::optimization::errors::OptError;
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
 use statrs::distribution::{ExpError, GammaError, WeibullError};
+
+#[cfg(feature = "python-bindings")]
+use pyo3::exceptions::PyValueError;
+#[cfg(feature = "python-bindings")]
+use pyo3::prelude::*;
 
 /// Crate-wide result alias for ACD operations that may produce [`ACDError`].
 pub type ACDResult<T> = Result<T, ACDError>;
@@ -433,6 +436,7 @@ impl std::fmt::Display for ACDError {
 /// Convert an [`ACDError`] into a Python `ValueError` with the error message.
 ///
 /// This is used at the Rust↔Python boundary to surface domain errors cleanly.
+#[cfg(feature = "python-bindings")]
 impl From<ACDError> for PyErr {
     fn from(err: ACDError) -> PyErr {
         PyValueError::new_err(err.to_string())
@@ -651,6 +655,7 @@ impl std::fmt::Display for ParamError {
 }
 
 /// Convert a [`ParamError`] into a Python `ValueError` with the error message.
+#[cfg(feature = "python-bindings")]
 impl std::convert::From<ParamError> for PyErr {
     fn from(err: ParamError) -> PyErr {
         PyValueError::new_err(err.to_string())
@@ -834,4 +839,5 @@ mod tests {
             other => panic!("unexpected ACDError variant: {other:?}"),
         }
     }
+
 }

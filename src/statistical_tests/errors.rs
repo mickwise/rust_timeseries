@@ -55,7 +55,10 @@
 //!     contains the original Rust error message.
 //! - Additional integration tests in the statistical-test modules exercise
 //!   these errors indirectly via input validation and test execution.
+
+#[cfg(feature = "python-bindings")]
 use pyo3::PyErr;
+#[cfg(feature = "python-bindings")]
 use pyo3::exceptions::PyOSError;
 
 pub type ELResult<T> = Result<T, ELError>;
@@ -133,6 +136,7 @@ impl std::fmt::Display for ELError {
     }
 }
 
+#[cfg(feature = "python-bindings")]
 impl From<ELError> for PyErr {
     fn from(err: ELError) -> PyErr {
         PyOSError::new_err(err.to_string())

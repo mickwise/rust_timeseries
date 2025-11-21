@@ -34,9 +34,13 @@ pub mod inference;
 pub mod optimization;
 pub mod statistical_tests;
 pub mod utils;
+#[cfg(feature = "python-bindings")]
 use crate::{statistical_tests::escanciano_lobato::ELOutcome, utils::extract_f64_array};
+#[cfg(feature = "python-bindings")]
 use numpy::PyReadonlyArray1;
+#[cfg(feature = "python-bindings")]
 use pyo3::exceptions::PyValueError;
+#[cfg(feature = "python-bindings")]
 use pyo3::prelude::*;
 
 /// Escanciano–Lobato heteroskedasticity proxy test.
@@ -63,12 +67,14 @@ use pyo3::prelude::*;
 /// Notes
 /// -----
 /// The statistic is asymptotically χ²(1) under the null.
+#[cfg(feature = "python-bindings")]
 #[pyclass(module = "rust_timeseries.statistical_tests")]
 pub struct EscancianoLobato {
     /// The EL test result struct.
     inner: ELOutcome,
 }
 
+#[cfg(feature = "python-bindings")]
 #[pymethods]
 impl EscancianoLobato {
     /// Result of the Escanciano–Lobato heteroscedasticity proxy \(EL\) test.
@@ -126,7 +132,7 @@ impl EscancianoLobato {
         self.inner.p_value()
     }
 }
-
+#[cfg(feature = "python-bindings")]
 #[pymodule]
 fn _rust_timeseries<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
     let statistical_tests_mod = PyModule::new(_py, "statistical_tests")?;
@@ -138,7 +144,7 @@ fn _rust_timeseries<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult
         .set_item("rust_timeseries.statistical_tests", statistical_tests_mod)?;
     Ok(())
 }
-
+#[cfg(feature = "python-bindings")]
 fn statistical_tests<'py>(
     _py: Python, rust_timeseries: &Bound<'py, PyModule>, m: &Bound<'py, PyModule>,
 ) -> PyResult<()> {
