@@ -73,15 +73,13 @@ use pyo3::{exceptions::PyValueError, prelude::*, types::PyAny};
 use crate::{
     duration::{
         core::{
-            data::{ACDData, ACDMeta},
             innovations::ACDInnovation,
             params::ACDParams,
-            units::ACDUnit,
         },
         errors::ACDError,
         models::acd::ACDModel,
-        optimization::loglik_optimizer::traits::OptimOutcome,
     },
+    optimization::loglik_optimizer::traits::OptimOutcome,
     statistical_tests::escanciano_lobato::ELOutcome,
     utils::{build_acd_model, extract_acd_data, extract_f64_array, extract_hac_options},
 };
@@ -257,7 +255,7 @@ impl EscancianoLobato {
 /// - Native Rust callers should usually work with [`ACDModel`] directly; this
 ///   type exists solely for the PyO3 binding surface.
 #[cfg(feature = "python-bindings")]
-#[pyclass(module = "rust_timeseries.duration_models")]
+#[pyclass(module = "rust_timeseries.duration_models", unsendable)]
 pub struct ACD {
     /// Underlying Rust ACDModel.
     pub inner: ACDModel,
