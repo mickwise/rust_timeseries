@@ -71,7 +71,7 @@
 //!   optimizer behavior) are tested in the duration core and optimization
 //!   modules, not here.
 
-use ndarray::{ArrayView1, ArrayViewMut1, Zip, s};
+use ndarray::{Array1, Array2, ArrayView1, ArrayViewMut1, Zip, s};
 
 /// Safety margin for strict stationarity in ACD models.
 ///
@@ -447,11 +447,123 @@ pub fn safe_logistic(x: f64) -> f64 {
     }
 }
 
+/// delta_method — map θ-space covariance to (ω, α, β) covariance.
+///
+/// Purpose
+/// -------
+/// Apply the multivariate delta method to transform a covariance matrix in
+/// unconstrained θ-space into a covariance matrix for the model-space
+/// parameters `(ω, α, β)` used in the ACD mapping:
+/// - `ω = softplus(θ₀)`,
+/// - `(α, β, slack)` = `(1 - STATIONARITY_MARGIN) · softmax(θ₁: )` (with
+///   implicit slack).
+///
+/// Parameters
+/// ----------
+/// - `theta_space_cov`: `&Array2<f64>`
+///   Symmetric `n×n` covariance matrix for the unconstrained parameters
+///   θ, where `n = 1 + q + p`.
+/// - `theta_hat`: `&Array1<f64>`
+///   Unconstrained parameter vector at which the Jacobian is evaluated
+///   (typically the MLE θ̂). Must have length `1 + q + p`.
+/// - `alpha`: `&Array1<f64>`
+///   Fitted `α` weights of length `q` corresponding to `theta_hat` via
+///   `safe_softmax`.
+/// - `beta`: `&Array1<f64>`
+///   Fitted `β` weights of length `p` corresponding to `theta_hat`.
+///
+/// Returns
+/// -------
+/// `Array2<f64>`
+///   Full `(1 + q + p)×(1 + q + p)` covariance matrix for `(ω, α, β)`
+///   obtained via the delta method:
+///   `Σ_param = J Σ_θ Jᵀ`, where `J` is the Jacobian of the mapping
+///   θ ↦ (ω, α, β) at `theta_hat`.
+///
+/// Panics
+/// ------
+/// - Should never panic under normal usage.
+///
+/// Notes
+/// -----
+/// - This implementation uses only the existing `safe_logistic` and
+///   `safe_softmax_deriv` primitives. It never differentiates the internal
+///   `max θ_i` stabilization used in `safe_softmax`; the Jacobian is
+///   defined for the *mathematical* softplus/softmax map.
+/// - Complexity is O(n³) in the number of parameters `n = 1 + q + p`,
+///   which is negligible for typical ACD(p, q) orders.
+pub fn delta_method(
+    theta_space_cov: &Array2<f64>, theta_hat: &Array1<f64>, alpha: &Array1<f64>, beta: &Array1<f64>,
+) -> Array2<f64> {
+    let n = theta_hat.len();
+    let mut jt = Array2::<f64>::zeros((n, n));
+    for i in 0..n {
+        let mut e_i = Array1::<f64>::zeros(n);
+        e_i[i] = 1.0;
+        let g_i = apply_jt(theta_hat, alpha, beta, &e_i);
+        for k in 0..n {
+            jt[[k, i]] = g_i[k];
+        }
+    }
+
+    // Σ_param = J Σ_θ Jᵀ = (Jᵀ)ᵀ Σ_θ (Jᵀ) = jtᵀ * theta_space_cov * jt
+    let tmp = theta_space_cov.dot(&jt);
+    let jt_t = jt.t().to_owned();
+    jt_t.dot(&tmp)
+}
+
+// ----------- Helper methods ------------
+
+/// apply_jt — apply Jᵀ to a parameter-space direction.
+///
+/// Purpose
+/// -------
+/// Given a direction `u_param` in parameter space `(ω, α, β)`, compute
+/// the corresponding direction in θ-space via the transpose Jacobian
+/// `Jᵀ`. This reuses the same primitives used in gradient maximization:
+/// - `safe_logistic` for ω,
+/// - `safe_softmax_deriv` for `(α, β)`
+///
+/// Parameters
+/// ----------
+/// - `theta_hat`: `&Array1<f64>`
+///   Unconstrained parameters at which the Jacobian is evaluated.
+/// - `alpha`: `&Array1<f64>`
+///   Fitted α weights at `theta_hat`.
+/// - `beta`: `&Array1<f64>`
+///   Fitted β weights at `theta_hat`.
+/// - `u_param`: `&Array1<f64>`
+///   Direction in parameter space (length `1 + q + p`).
+///
+/// Returns
+/// -------
+/// `Array1<f64>`
+///   The θ-space direction `Jᵀ u_param`.
+fn apply_jt(
+    theta_hat: &Array1<f64>, alpha: &Array1<f64>, beta: &Array1<f64>, u_param: &Array1<f64>,
+) -> Array1<f64> {
+    let n = u_param.len();
+    let mut out = Array1::<f64>::zeros(n);
+    out[0] = u_param[0] * safe_logistic(theta_hat[0]);
+    let mut tmp = u_param.slice(s![1..]).to_owned(); // length q + p
+    let mut alpha_tmp = alpha.clone();
+    let mut beta_tmp = beta.clone();
+    {
+        let mut alpha_view = alpha_tmp.view_mut();
+        let mut beta_view = beta_tmp.view_mut();
+        let mut tmp_view = tmp.view_mut();
+        safe_softmax_deriv(&mut alpha_view, &mut beta_view, &mut tmp_view);
+    }
+
+    out.slice_mut(s![1..]).assign(&tmp);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use ndarray::{Array1, array, s};
+    use ndarray::{Array1, Array2, array, s};
 
     // -------------------------------------------------------------------------
     // Scope
@@ -461,6 +573,10 @@ mod tests {
     // - Softmax mapping from logits to (α, β, slack) under STATIONARITY_MARGIN.
     // - The Jacobian–vector product implemented by `safe_softmax_deriv` in
     //   low dimensions via a finite-difference check.
+    // - The transpose-Jacobian application in `apply_jt` via a scalar
+    //   finite-difference delta-method check.
+    // - The full delta-method covariance transformation in `delta_method`
+    //   versus an explicit finite-difference Jacobian construction.
     //
     // They intentionally DO NOT cover:
     // - Parameter/domain validation (shape, positivity, finiteness), which is
@@ -693,5 +809,184 @@ mod tests {
         // sanity: both directions should be small compared to base g0
         assert!(jv_analytic.iter().all(|v| v.is_finite()));
         assert!(g0.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    // Purpose
+    // -------
+    // Verify that `apply_jt` matches a scalar delta-method finite-difference
+    // gradient for the mapping θ ↦ (ω, α, β) on a small (q = 1, p = 1) system.
+    //
+    // Given
+    // -----
+    // - θ̂ ∈ ℝ³ with components (θ₀, θ₁, θ₂).
+    // - A parameter-space direction u_param ∈ ℝ³.
+    //
+    // Expect
+    // ------
+    // - `apply_jt(θ̂, α(θ̂), β(θ̂), u_param)` ≈ ∇_θ [u_param · f(θ)] where
+    //   f(θ) = (ω(θ₀), α(θ₁, θ₂), β(θ₁, θ₂)).
+    fn apply_jt_matches_finite_difference_scalar_delta_method() {
+        let q = 1usize;
+        let p = 1usize;
+        let n = 1 + q + p;
+
+        // θ̂: some non-degenerate point in θ-space
+        let theta_hat = array![0.3_f64, -0.5_f64, 0.8_f64];
+
+        // compute α, β at θ̂[1:]
+        let mut alpha = Array1::<f64>::zeros(q);
+        let mut beta = Array1::<f64>::zeros(p);
+        {
+            let theta_ab = theta_hat.slice(s![1..]);
+            let alpha_view = alpha.view_mut();
+            let beta_view = beta.view_mut();
+            let _slack = safe_softmax(alpha_view, beta_view, &theta_ab);
+        }
+
+        // direction in parameter space (ω, α, β)
+        let u_param = array![1.0_f64, -0.3_f64, 0.5_f64];
+
+        // analytic Jᵀ u via apply_jt
+        let jtu_analytic = apply_jt(&theta_hat, &alpha, &beta, &u_param);
+
+        // scalar function g(θ) = u_param · f(θ)
+        let eval_scalar = |theta: &Array1<f64>| -> f64 {
+            // recompute α, β at this θ
+            let mut alpha_loc = Array1::<f64>::zeros(q);
+            let mut beta_loc = Array1::<f64>::zeros(p);
+            {
+                let theta_ab = theta.slice(s![1..]);
+                let alpha_view = alpha_loc.view_mut();
+                let beta_view = beta_loc.view_mut();
+                let _slack = safe_softmax(alpha_view, beta_view, &theta_ab);
+            }
+            let omega = safe_softplus(theta[0]);
+
+            let mut params = Array1::<f64>::zeros(n);
+            params[0] = omega;
+            params[1] = alpha_loc[0];
+            params[2] = beta_loc[0];
+
+            u_param.dot(&params)
+        };
+
+        // centered finite-difference gradient ∇_θ g(θ̂)
+        let eps = 1e-6_f64;
+        let mut jtu_fd = Array1::<f64>::zeros(n);
+        for j in 0..n {
+            let mut theta_plus = theta_hat.clone();
+            let mut theta_minus = theta_hat.clone();
+            theta_plus[j] += eps;
+            theta_minus[j] -= eps;
+
+            let g_plus = eval_scalar(&theta_plus);
+            let g_minus = eval_scalar(&theta_minus);
+
+            jtu_fd[j] = (g_plus - g_minus) / (2.0 * eps);
+        }
+
+        assert_vec_close(&jtu_analytic, &jtu_fd, 1e-4);
+    }
+
+    #[test]
+    // Purpose
+    // -------
+    // Verify that `delta_method` produces a covariance matrix consistent with
+    // an explicit finite-difference Jacobian for θ ↦ (ω, α, β) when the
+    // θ-space covariance is the identity.
+    //
+    // Given
+    // -----
+    // - θ̂ ∈ ℝ³ with components (θ₀, θ₁, θ₂).
+    // - Σ_θ = I₃.
+    //
+    // Expect
+    // ------
+    // - `delta_method(Σ_θ, θ̂, α(θ̂), β(θ̂))` ≈ J Jᵀ where
+    //   J is the Jacobian of f(θ) = (ω, α, β) at θ̂ constructed by finite
+    //   differences.
+    fn delta_method_matches_finite_difference_jacobian_covariance() {
+        let q = 1usize;
+        let p = 1usize;
+        let n = 1 + q + p;
+
+        // θ̂: same as previous test for consistency
+        let theta_hat = array![0.3_f64, -0.5_f64, 0.8_f64];
+
+        // α, β at θ̂[1:]
+        let mut alpha = Array1::<f64>::zeros(q);
+        let mut beta = Array1::<f64>::zeros(p);
+        {
+            let theta_ab = theta_hat.slice(s![1..]);
+            let alpha_view = alpha.view_mut();
+            let beta_view = beta.view_mut();
+            let _slack = safe_softmax(alpha_view, beta_view, &theta_ab);
+        }
+
+        // Σ_θ = I_n
+        let mut theta_cov = Array2::<f64>::zeros((n, n));
+        for i in 0..n {
+            theta_cov[[i, i]] = 1.0;
+        }
+
+        // covariance via delta_method
+        let cov_delta = delta_method(&theta_cov, &theta_hat, &alpha, &beta);
+
+        // explicit finite-difference Jacobian J of f(θ) = (ω, α, β)
+        let eval_params = |theta: &Array1<f64>| -> Array1<f64> {
+            let mut alpha_loc = Array1::<f64>::zeros(q);
+            let mut beta_loc = Array1::<f64>::zeros(p);
+            {
+                let theta_ab = theta.slice(s![1..]);
+                let alpha_view = alpha_loc.view_mut();
+                let beta_view = beta_loc.view_mut();
+                let _slack = safe_softmax(alpha_view, beta_view, &theta_ab);
+            }
+            let omega = safe_softplus(theta[0]);
+
+            let mut out = Array1::<f64>::zeros(n);
+            out[0] = omega;
+            out[1] = alpha_loc[0];
+            out[2] = beta_loc[0];
+            out
+        };
+
+        let eps = 1e-6_f64;
+        let mut j_fd = Array2::<f64>::zeros((n, n));
+        for j in 0..n {
+            let mut theta_plus = theta_hat.clone();
+            let mut theta_minus = theta_hat.clone();
+            theta_plus[j] += eps;
+            theta_minus[j] -= eps;
+
+            let f_plus = eval_params(&theta_plus);
+            let f_minus = eval_params(&theta_minus);
+            let col = (&f_plus - &f_minus).mapv(|v| v / (2.0 * eps));
+
+            for i in 0..n {
+                j_fd[[i, j]] = col[i];
+            }
+        }
+
+        // Σ_param_fd = J Σ_θ Jᵀ = J Jᵀ (since Σ_θ = I)
+        let cov_fd = j_fd.dot(&j_fd.t());
+
+        // compare matrices entrywise
+        assert_eq!(cov_delta.nrows(), n);
+        assert_eq!(cov_delta.ncols(), n);
+        assert_eq!(cov_fd.nrows(), n);
+        assert_eq!(cov_fd.ncols(), n);
+
+        for i in 0..n {
+            for j in 0..n {
+                assert_relative_eq!(
+                    cov_delta[[i, j]],
+                    cov_fd[[i, j]],
+                    epsilon = 1e-8,
+                    max_relative = 1e-4
+                );
+            }
+        }
     }
 }

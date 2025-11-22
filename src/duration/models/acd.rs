@@ -105,14 +105,14 @@ use crate::{
         errors::{ACDError, ACDResult},
         models::model_internals::{ObsEntry, calculate_scores, extract_theta, walk_observations},
     },
-    inference::{HACOptions, calculate_avg_scores_cov, hessian::calc_standard_errors},
+    inference::{HACOptions, calc_covariance, calculate_avg_scores_cov},
     optimization::{
         errors::OptResult,
         loglik_optimizer::{Grad, LogLikelihood, OptimOutcome, Theta, maximize},
-        numerical_stability::transformations::{safe_logistic, safe_softmax_deriv},
+        numerical_stability::transformations::{delta_method, safe_logistic, safe_softmax_deriv},
     },
 };
-use ndarray::{Array1, s};
+use ndarray::{Array1, Array2, s};
 use std::cell::RefCell;
 
 /// ACDModel — full ACD(p, q) model for durations.
@@ -162,7 +162,7 @@ use std::cell::RefCell;
 /// - `fitted_params`: `Option<ACDParams>`
 ///   Snapshot of model-space parameters (ω, α, β, slack, ψ-lags) at θ̂,
 ///   used for forecasting and reporting.
-/// - `forecast`: `Option<ACDForecastResult>`
+/// - `forecast_result`: `Option<ACDForecastResult>`
 ///   Last forecast path produced by [`ACDModel::forecast`].
 ///
 /// Invariants
@@ -201,7 +201,7 @@ pub struct ACDModel {
     /// Fitted parameters (populated after `fit`).
     pub fitted_params: Option<ACDParams>,
     /// Forecasting results (populated after `forecast`).
-    pub forecast: Option<ACDForecastResult>,
+    pub forecast_result: Option<ACDForecastResult>,
 }
 
 impl ACDModel {
@@ -257,7 +257,7 @@ impl ACDModel {
             scratch_bufs,
             results: None,
             fitted_params: None,
-            forecast: None,
+            forecast_result: None,
         }
     }
 
@@ -382,68 +382,79 @@ impl ACDModel {
             &forecast_result,
             &self.options.psi_guards,
         );
-        self.forecast = Some(forecast_result);
+        self.forecast_result = Some(forecast_result);
         h_forecast
     }
 
-    /// Compute classical or HAC-robust standard errors at the fitted ACD parameters.
+    /// covariance_matrix — classical or HAC-robust covariance for (ω, α, β).
     ///
-    /// This routine builds standard errors for the **unconstrained parameter
-    /// vector** θ = (θ₀, θ₁,…, θ_{p+q}) used by the optimizer. By default it
-    /// returns *classical* (observed-information) SEs; with [`HACOptions`] it
-    /// returns *robust* (sandwich/HAC) SEs that account for serial correlation
-    /// and heteroskedasticity in the per-observation scores.
+    /// Purpose
+    /// -------
+    /// Compute a classical or HAC-robust covariance matrix for the **model-space
+    /// parameters** `(ω, α, β)` at the fitted ACD(p, q) model. Internally, this
+    /// routine first builds a covariance estimator in unconstrained θ-space and
+    /// then applies a multivariate delta method to map that covariance into
+    /// parameter space.
     ///
     /// Parameters
     /// ----------
     /// - `data`: `&ACDData`
-    ///   Observed duration series used to compute per-observation scores and
-    ///   to re-evaluate the gradient as needed for Hessian approximation.
+    ///   Observed duration series used to evaluate gradients and per-observation
+    ///   scores. The same in-sample data used in `fit` should be passed here.
     /// - `hac_opts`: `Option<&HACOptions>`
-    ///   - `None` for classical SEs based on the observed information.
-    ///   - `Some(opts)` for robust/HAC SEs that use `opts.kernel`,
-    ///     `opts.bandwidth`, `opts.center`, and optional small-sample
-    ///     corrections.
+    ///   - `None` for classical covariance based on the observed information
+    ///     matrix in θ-space.
+    ///   - `Some(opts)` for HAC-robust covariance, where `opts` controls the
+    ///     kernel, bandwidth, centering, and optional small-sample corrections
+    ///     used to build the average-score covariance in θ-space.
     ///
     /// Returns
     /// -------
-    /// `ACDResult<Array1<f64>>`
-    ///   A length-(1 + p + q) vector of standard errors in θ-space (the
-    ///   optimizer’s unconstrained parameters).
+    /// `ACDResult<Array2<f64>>`
+    ///   On success, an `(1 + p + q) × (1 + p + q)` covariance matrix for the
+    ///   model-space parameters `(ω, α, β)` evaluated at the fitted θ̂. The
+    ///   ordering matches the ACD parameter layout implied by `ACDShape`:
+    ///   first `ω`, then the `q` α coefficients, then the `p` β coefficients.
     ///
     /// Errors
     /// ------
     /// - [`ACDError::ModelNotFitted`]
-    ///   Returned if no θ̂ is available (model has not been fitted).
+    ///   Returned if no fitted parameters are available (i.e., `fit` has not
+    ///   been called successfully).
     /// - Other [`ACDError`] variants
     ///   Propagated from:
-    ///   - [`ACDModel::grad`] (during finite-differenced Hessian construction),
-    ///   - [`calculate_scores`] / [`calculate_avg_scores`] (for HAC SEs),
-    ///   - [`calc_standard_errors`] (e.g., Hessian regularization failures).
+    ///   - [`ACDModel::grad`] during finite-difference Hessian construction,
+    ///   - [`calculate_scores`] / [`calculate_avg_scores_cov`] when building
+    ///     HAC score covariances,
+    ///   - lower-level optimization / inference components if they encounter
+    ///     non-finite values or dimension mismatches.
     ///
     /// Panics
     /// ------
     /// - Never panics on invalid user inputs; such conditions are surfaced as
-    ///   [`ACDError`] values.
+    ///   [`ACDError`] values. Any panic would indicate a programming error
+    ///   (e.g., inconsistent buffer sizes or shape mismatches).
     ///
     /// Notes
     /// -----
-    /// - Classical SEs (no HAC) use the observed information J(θ̂) obtained by
-    ///   finite-differencing the analytic gradient `self.grad(·, data)`.
-    ///   Inversion uses an eigendecomposition with a Moore–Penrose
-    ///   pseudoinverse and eigenvalue clipping at `EIGEN_EPS` if needed.
-    /// - Robust/HAC SEs form a covariance estimator S of the average score
-    ///   using the kernel and bandwidth in [`HACOptions`], optionally with
-    ///   Newey–West small-sample corrections, and then apply a sandwich
-    ///   variance formula with J(θ̂)⁺.
-    /// - If any gradient evaluation fails inside the Hessian or HAC machinery,
-    ///   the internal callback records the last runtime error and this method
-    ///   returns that [`ACDError`] instead of silently propagating NaNs.
-    /// - To obtain SEs for model-space parameters (ω, α, β, slack), apply a
-    ///   delta-method transform using the Jacobian of the softplus/softmax map.
-    pub fn standard_errors(
+    /// - θ-space covariance is computed by [`calc_covariance`], which uses an
+    ///   eigen-based pseudoinverse of the observed information, with eigenvalues
+    ///   below `EIGEN_EPS` dropped to guard against weak identification.
+    /// - The mapping from θ-space to `(ω, α, β)` covariance uses
+    ///   [`delta_method`], which applies the Jacobian of the ACD parameter map
+    ///   (softplus for `ω`, stationarity-scaled softmax for `(α, β)`) at θ̂.
+    /// - The returned matrix is in **parameter space**, not θ-space. If
+    ///   θ-space covariance is needed directly, call [`calc_covariance`]
+    ///   instead of this method.
+    pub fn covariance_matrix(
         &self, data: &ACDData, hac_opts: Option<&HACOptions>,
-    ) -> ACDResult<Array1<f64>> {
+    ) -> ACDResult<Array2<f64>> {
+        let fitted_params = match &self.fitted_params {
+            Some(params) => params,
+            None => return Err(ACDError::ModelNotFitted),
+        };
+        let alpha = &fitted_params.alpha;
+        let beta = &fitted_params.beta;
         let runtime_error = RefCell::new(None);
         let theta_hat = extract_theta(self)?;
         let calc_grad = |th: &Array1<f64>| match self.grad(th, data) {
@@ -453,20 +464,23 @@ impl ACDModel {
                 Array1::from_elem(th.len(), f64::NAN)
             }
         };
-        let se_result = match hac_opts {
+        let theta_space_cov = match hac_opts {
             Some(hac) => {
                 let raw_scores = calculate_scores(&self, data)?;
                 let avg_scores = calculate_avg_scores_cov(&hac, &raw_scores);
-                calc_standard_errors(&calc_grad, theta_hat, Some(&avg_scores))
+                calc_covariance(&calc_grad, theta_hat, Some(&avg_scores))
             }
-            None => calc_standard_errors(&calc_grad, theta_hat, None),
+            None => calc_covariance(&calc_grad, theta_hat, None),
         };
 
         if let Some(e) = runtime_error.into_inner() {
             return Err(e.into());
         }
 
-        Ok(se_result?)
+        match theta_space_cov {
+            Err(e) => Err(e.into()),
+            Ok(theta_space_cov) => Ok(delta_method(&theta_space_cov, &theta_hat, alpha, beta)),
+        }
     }
 }
 
@@ -684,33 +698,6 @@ mod tests {
     #[test]
     // Purpose
     // -------
-    // Verify that `ACDModel::standard_errors` returns `ACDError::ModelNotFitted`
-    // when called before the model has been fitted.
-    //
-    // Given
-    // -----
-    // - A freshly constructed ACD(1, 1) model with valid data but no fit.
-    //
-    // Expect
-    // ------
-    // - `standard_errors(&data, None)` returns `Err(ACDError::ModelNotFitted)`.
-    fn acdmodel_standard_errors_errors_when_model_not_fitted() {
-        // Arrange
-        let (model, data) = make_acd11_fixture();
-
-        // Act
-        let result = model.standard_errors(&data, None);
-
-        // Assert
-        match result {
-            Err(ACDError::ModelNotFitted) => {}
-            other => panic!("Expected ModelNotFitted, got {other:?}"),
-        }
-    }
-
-    #[test]
-    // Purpose
-    // -------
     // Verify that `ACDModel::fit` succeeds on a simple positive duration series
     // and populates `results` and `fitted_params`.
     //
@@ -743,46 +730,6 @@ mod tests {
             model.fitted_params.is_some(),
             "model.fitted_params should be populated after a successful fit"
         );
-    }
-
-    #[test]
-    // Purpose
-    // -------
-    // Verify that `ACDModel::standard_errors` returns a finite SE vector of
-    // length 1 + p + q after a successful fit (classical, non-HAC case).
-    //
-    // Given
-    // -----
-    // - A successfully fitted ACD(1, 1) model on a simple positive duration
-    //   series.
-    //
-    // Expect
-    // ------
-    // - `standard_errors(&data, None)` returns `Ok(se)` where:
-    //   - `se.len() == 1 + p + q`,
-    //   - all entries of `se` are finite.
-    fn acdmodel_standard_errors_returns_finite_vector_after_fit() {
-        // Arrange
-        let (mut model, data) = make_acd11_fixture();
-        let p = model.shape.p;
-        let q = model.shape.q;
-        let theta0: Array1<f64> = Array1::zeros(1 + p + q);
-
-        model.fit(theta0, &data).expect("fit should succeed before computing standard errors");
-
-        // Act
-        let se_result = model.standard_errors(&data, None);
-
-        // Assert
-        let se = se_result.expect("standard_errors should succeed in the classical case");
-        assert_eq!(
-            se.len(),
-            1 + p + q,
-            "SE vector length should match number of unconstrained parameters"
-        );
-        for (i, val) in se.iter().enumerate() {
-            assert!(val.is_finite(), "SE[{i}] should be finite, got {val}",);
-        }
     }
 
     #[test]
@@ -860,5 +807,95 @@ mod tests {
             fd_grad.as_slice().unwrap(),
             max_relative = 1e-4
         );
+    }
+
+    #[test]
+    // Purpose
+    // -------
+    // Verify that `ACDModel::covariance_matrix` returns `ACDError::ModelNotFitted`
+    // when called before the model has been fitted.
+    //
+    // Given
+    // -----
+    // - A freshly constructed ACD(1, 1) model with valid data but no fit.
+    //
+    // Expect
+    // ------
+    // - `covariance_matrix(&data, None)` returns `Err(ACDError::ModelNotFitted)`.
+    fn acdmodel_covariance_matrix_errors_when_model_not_fitted() {
+        // Arrange
+        let (model, data) = make_acd11_fixture();
+
+        // Act
+        let result = model.covariance_matrix(&data, None);
+
+        // Assert
+        match result {
+            Err(ACDError::ModelNotFitted) => {}
+            other => panic!("Expected ModelNotFitted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    // Purpose
+    // -------
+    // Verify that `ACDModel::covariance_matrix` returns a finite, symmetric
+    // covariance matrix of the expected shape after a successful fit
+    // (classical, non-HAC case).
+    //
+    // Given
+    // -----
+    // - A successfully fitted ACD(1, 1) model on a simple positive duration
+    //   series.
+    //
+    // Expect
+    // ------
+    // - `covariance_matrix(&data, None)` returns `Ok(cov)` where:
+    //   - `cov.shape() == (1 + p + q, 1 + p + q)`,
+    //   - all entries of `cov` are finite,
+    //   - `cov` is numerically symmetric.
+    fn acdmodel_covariance_matrix_returns_finite_symmetric_matrix_after_fit() {
+        // Arrange
+        let (mut model, data) = make_acd11_fixture();
+        let p = model.shape.p;
+        let q = model.shape.q;
+        let theta0: Array1<f64> = Array1::zeros(1 + p + q);
+
+        model.fit(theta0, &data).expect("fit should succeed before computing covariance");
+
+        // Act
+        let cov_res = model.covariance_matrix(&data, None);
+
+        // Assert
+        let cov = cov_res.expect("covariance_matrix should succeed in the classical case");
+
+        // shape: (1 + p + q) × (1 + p + q)
+        let expected_dim = 1 + p + q;
+        assert_eq!(cov.nrows(), expected_dim, "covariance_matrix should have nrows == 1 + p + q");
+        assert_eq!(cov.ncols(), expected_dim, "covariance_matrix should have ncols == 1 + p + q");
+
+        // finiteness
+        for i in 0..cov.nrows() {
+            for j in 0..cov.ncols() {
+                assert!(
+                    cov[[i, j]].is_finite(),
+                    "cov[{i},{j}] should be finite, got {}",
+                    cov[[i, j]]
+                );
+            }
+        }
+
+        // numerical symmetry: cov[i, j] ≈ cov[j, i]
+        for i in 0..cov.nrows() {
+            for j in 0..cov.ncols() {
+                let a = cov[[i, j]];
+                let b = cov[[j, i]];
+                let diff = (a - b).abs();
+                assert!(
+                    diff < 1e-10,
+                    "covariance_matrix not symmetric at ({i},{j}): {a} vs {b}, diff = {diff}"
+                );
+            }
+        }
     }
 }

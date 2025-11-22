@@ -40,7 +40,7 @@ pub mod kernel;
 // ---- Re-exports (primary surface) ----
 pub use self::errors::{InferenceError, InferenceResult};
 pub use self::hac::{HACOptions, calculate_avg_scores_cov};
-pub use self::hessian::calc_standard_errors;
+pub use self::hessian::calc_covariance;
 pub use self::kernel::KernelType;
 
 // Optional convenience prelude for downstream crates:
@@ -48,6 +48,6 @@ pub use self::kernel::KernelType;
 pub mod prelude {
     pub use super::errors::{InferenceError, InferenceResult};
     pub use super::hac::{HACOptions, calculate_avg_scores_cov};
-    pub use super::hessian::calc_standard_errors;
+    pub use super::hessian::calc_covariance;
     pub use super::kernel::KernelType;
 }
