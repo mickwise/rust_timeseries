@@ -4,7 +4,7 @@
 //! -------
 //! - Validate the end-to-end ACD pipeline: from validated duration data,
 //!   through model construction and MLE fitting, to classical and HAC
-//!   standard errors and forecasting.
+//!   covariance matrices (and implied standard errors) and forecasting.
 //! - Exercise realistic parameter regimes (shapes, scales, innovations,
 //!   and optimizer settings) rather than toy edge cases only.
 //!
@@ -14,7 +14,7 @@
 //!   - `ACDData` construction with and without a `t0` offset.
 //!   - `ACDShape` validation for admissible vs invalid (p, q, n).
 //! - `duration::models::acd::ACDModel`:
-//!   - Model construction, fitting, standard errors, and forecasting.
+//!   - Model construction, fitting, covariance matrices / standard errors, and forecasting.
 //! - `inference::hac` and `inference::kernel`:
 //!   - Classical vs HAC standard-error paths, including non-default
 //!     kernels and bandwidth settings.
@@ -78,7 +78,7 @@ use rust_timeseries::{
 /// -----
 /// - Used by integration tests that need a simple but non-degenerate
 ///   series to:
-///   - highlight differences between classical and HAC SEs, and
+///   - highlight differences between classical and HAC covariance / SEs, and
 ///   - exercise the optimizer on mildly trending data.
 fn make_trending_data(n: usize, base: f64, slope: f64) -> ACDData {
     let data = Array1::from_iter((0..n).map(|t| {
@@ -245,13 +245,13 @@ fn fit_acd_model(
 // Expect
 // ------
 // - `fit_acd_model` succeeds for every (shape, base, innovation) combo.
-// - Classical SEs:
-//   - Have length `1 + p + q`.
-//   - Contain only finite, non-negative values.
-// - HAC SEs:
-//   - Have length `1 + p + q`.
-//   - Contain only finite values (non-negativity is empirically expected
-//     but not asserted here).
+// - Classical covariance:
+//   - Has shape `(1 + p + q, 1 + p + q)`.
+//   - Contains only finite entries.
+//   - Has non-negative diagonal entries (variances).
+// - HAC covariance:
+//   - Has shape `(1 + p + q, 1 + p + q)`.
+//   - Contains only finite entries.
 // - Forecasts for horizon `h = 5` are finite and strictly positive for
 //   all configurations.
 fn acd_api_supports_multiple_shapes_scales_and_innovations() {
@@ -269,18 +269,42 @@ fn acd_api_supports_multiple_shapes_scales_and_innovations() {
             for &innovation in innovations {
                 let (mut model, data, theta_dim) =
                     fit_acd_model(p, q, n, base, slope, innovation, &opts);
-                // classical SEs must be non-negative and finite
-                let se_classical = model
-                    .standard_errors(&data, None)
-                    .expect("classical SEs should succeed after fit");
-                assert_eq!(se_classical.len(), theta_dim);
-                assert!(se_classical.iter().all(|v| v.is_finite() && *v >= 0.0));
-                // HAC SEs: check length and finiteness only
-                let se_hac = model
-                    .standard_errors(&data, Some(&hac_opts))
-                    .expect("HAC SEs should succeed after fit");
-                assert_eq!(se_hac.len(), theta_dim);
-                assert!(se_hac.iter().all(|v| v.is_finite()));
+
+                // classical covariance: shape and finiteness
+                let cov_classical = model
+                    .covariance_matrix(&data, None)
+                    .expect("classical covariance should succeed after fit");
+                assert_eq!(
+                    (cov_classical.nrows(), cov_classical.ncols()),
+                    (theta_dim, theta_dim),
+                    "classical covariance should be (1 + p + q) × (1 + p + q)"
+                );
+                assert!(
+                    cov_classical.iter().all(|v| v.is_finite()),
+                    "all classical covariance entries should be finite"
+                );
+                for d in 0..theta_dim {
+                    let v = cov_classical[[d, d]];
+                    assert!(
+                        v.is_finite() && v >= 0.0,
+                        "variance on the diagonal should be finite and non-negative"
+                    );
+                }
+
+                // HAC covariance: shape and finiteness
+                let cov_hac = model
+                    .covariance_matrix(&data, Some(&hac_opts))
+                    .expect("HAC covariance should succeed after fit");
+                assert_eq!(
+                    (cov_hac.nrows(), cov_hac.ncols()),
+                    (theta_dim, theta_dim),
+                    "HAC covariance should be (1 + p + q) × (1 + p + q)"
+                );
+                assert!(
+                    cov_hac.iter().all(|v| v.is_finite()),
+                    "all HAC covariance entries should be finite"
+                );
+
                 // Forecast should be positive and finite
                 let h_forecast =
                     model.forecast(5, &data).expect("forecast should succeed after fit");
@@ -293,9 +317,10 @@ fn acd_api_supports_multiple_shapes_scales_and_innovations() {
 #[test]
 // Purpose
 // -------
-// Verify that HAC standard errors differ from classical SEs on a
-// trending series, demonstrating that the robust path is numerically
-// active and not simply returning the IID result.
+// Verify that HAC covariance (and thus implied standard errors) differs
+// from classical covariance on a trending series, demonstrating that
+// the robust path is numerically active and not simply returning the
+// IID result.
 //
 // Given
 // -----
@@ -311,12 +336,12 @@ fn acd_api_supports_multiple_shapes_scales_and_innovations() {
 // Expect
 // ------
 // - Fitting succeeds and yields finite parameter estimates.
-// - Both classical and HAC SE vectors:
-//   - Have equal length.
+// - Both classical and HAC covariance matrices:
+//   - Have equal shape `(1 + p + q, 1 + p + q)`.
 //   - Contain only finite entries.
-// - At least one coordinate of HAC SEs differs materially from the
-//   corresponding classical SE (not all coordinates are equal up to
-//   numerical noise at `1e-10`).
+// - At least one diagonal variance under HAC differs materially from
+//   the corresponding classical variance (not all diagonal entries are
+//   equal up to numerical noise at `1e-10`).
 fn hac_standard_errors_differ_from_classical_on_trending_series() {
     let n = 512;
     let data = make_trending_data(n, 1.0, 0.002);
@@ -329,16 +354,35 @@ fn hac_standard_errors_differ_from_classical_on_trending_series() {
     let theta_dim = 1 + p + q;
     let theta0 = Array1::from_elem(theta_dim, 0.0);
     model.fit(theta0, &data).expect("fit should succeed");
-    let se_classical = model.standard_errors(&data, None).expect("classical SEs");
+    let se_classical = model.covariance_matrix(&data, None).expect("classical SEs");
     let hac_opts = HACOptions::new(None, KernelType::Bartlett, true, true);
-    let se_hac = model.standard_errors(&data, Some(&hac_opts)).expect("HAC SEs");
-    assert_eq!(se_classical.len(), se_hac.len());
+    let se_hac = model.covariance_matrix(&data, Some(&hac_opts)).expect("HAC SEs");
+
+    assert_eq!(
+        (se_classical.nrows(), se_classical.ncols()),
+        (theta_dim, theta_dim),
+        "classical covariance should be (1 + p + q) × (1 + p + q)"
+    );
+    assert_eq!(
+        (se_hac.nrows(), se_hac.ncols()),
+        (theta_dim, theta_dim),
+        "HAC covariance should be (1 + p + q) × (1 + p + q)"
+    );
+
     for v in se_classical.iter().chain(se_hac.iter()) {
-        assert!(v.is_finite(), "all SE values should be finite");
+        assert!(v.is_finite(), "all covariance entries should be finite");
     }
-    // they should differ
-    let all_equal = se_hac.iter().zip(se_classical.iter()).all(|(h, c)| (h - c).abs() < 1e-10);
-    assert!(!all_equal, "HAC and classical SEs should differ on trending series");
+
+    // Compare diagonal variances: HAC should not be identical to classical
+    let all_diag_equal = (0..theta_dim).all(|i| {
+        let c = se_classical[[i, i]];
+        let h = se_hac[[i, i]];
+        (h - c).abs() < 1e-10
+    });
+    assert!(
+        !all_diag_equal,
+        "HAC and classical diagonal variances should differ on a trending series"
+    );
 }
 
 #[test]
@@ -364,12 +408,12 @@ fn hac_standard_errors_differ_from_classical_on_trending_series() {
 // Expect
 // ------
 // - `ACDModel::fit` converges without error under tuned options.
-// - Classical SEs:
-//   - Have length `1 + p + q`.
-//   - Are finite and non-negative.
-// - HAC SEs:
-//   - Have length `1 + p + q`.
-//   - Are finite.
+// - Classical covariance:
+//   - Has shape `(1 + p + q, 1 + p + q)`.
+//   - Is finite with non-negative diagonal entries.
+// - HAC covariance:
+//   - Has shape `(1 + p + q, 1 + p + q)`.
+//   - Is finite.
 // - Forecasts for horizon `h = 10` are finite and strictly positive.
 fn acd_api_respects_tuned_acdoptions() {
     let n = 256;
@@ -383,32 +427,52 @@ fn acd_api_respects_tuned_acdoptions() {
     let theta_dim = 1 + p + q;
     let theta0 = array![0.1, -0.05, 0.02];
     model.fit(theta0, &data).expect("fit should succeed with tuned options");
-    let se_classical = model.standard_errors(&data, None).expect("classical SEs tuned");
-    assert_eq!(se_classical.len(), theta_dim);
-    assert!(se_classical.iter().all(|v| v.is_finite() && *v >= 0.0));
+    let se_classical = model.covariance_matrix(&data, None).expect("classical SEs tuned");
+    assert_eq!(
+        (se_classical.nrows(), se_classical.ncols()),
+        (theta_dim, theta_dim),
+        "classical covariance should be (1 + p + q) × (1 + p + q)"
+    );
+    assert!(
+        se_classical.iter().all(|v| v.is_finite()),
+        "all classical covariance entries should be finite"
+    );
+    for d in 0..theta_dim {
+        let v = se_classical[[d, d]];
+        assert!(v.is_finite() && v >= 0.0, "classical diagonal variances should be non-negative");
+    }
+
     let hac_opts = HACOptions::new(Some(5), KernelType::QuadraticSpectral, false, false);
-    let se_hac = model.standard_errors(&data, Some(&hac_opts)).expect("HAC SEs tuned");
-    assert_eq!(se_hac.len(), theta_dim);
-    assert!(se_hac.iter().all(|v| v.is_finite()));
+    let se_hac = model.covariance_matrix(&data, Some(&hac_opts)).expect("HAC SEs tuned");
+    assert_eq!(
+        (se_hac.nrows(), se_hac.ncols()),
+        (theta_dim, theta_dim),
+        "HAC covariance should be (1 + p + q) × (1 + p + q)"
+    );
+    assert!(se_hac.iter().all(|v| v.is_finite()), "all HAC covariance entries should be finite");
     let forecast_val = model.forecast(10, &data).expect("forecast tuned");
     assert!(forecast_val.is_finite() && forecast_val > 0.0);
 }
 
 // Purpose
 // -------
-// Confirm that the ACD shape constructor rejects the degenerate case
-// (p, q) = (0, 0) as an invalid model specification.
+// Verify that the ACD API correctly handles a positive `t0` offset in
+// `ACDData`, including fitting, covariance computation, and forecasting.
 //
 // Given
 // -----
-// - Sample size `n = 10`.
-// - Shape request `ACDShape::new(0, 0, n)`.
+// - Sample size `n = 200` and offset `t0 = Some(50)`.
+// - A simple linearly trending duration series.
+// - Shape (p, q) = (1, 1) and Exponential innovations.
+// - Default `ACDOptions`.
 //
 // Expect
 // ------
-// - The constructor returns `Err(ACDError::InvalidModelShape { .. })`.
-// - No shape object is created for (0, 0), enforcing the constraint
-//   that at least one of p or q must be strictly positive.
+// - `ACDData::new` accepts the `t0` offset.
+// - `ACDModel::fit` succeeds on data with `t0 > 0`.
+// - `covariance_matrix(&data, None)` returns a finite covariance matrix
+//   of shape `(1 + p + q, 1 + p + q)` with non-negative diagonal entries.
+// - Short-horizon forecasts are finite and strictly positive.
 #[test]
 fn acd_model_handles_t0_offset() {
     let n = 200;
@@ -426,9 +490,20 @@ fn acd_model_handles_t0_offset() {
     let theta_dim = 1 + p + q;
     let theta0 = Array1::from_elem(theta_dim, 0.0);
     model.fit(theta0, &data).expect("fit should succeed with t0 > 0");
-    let se_classical = model.standard_errors(&data, None).expect("classical SEs with t0");
-    assert_eq!(se_classical.len(), theta_dim);
-    assert!(se_classical.iter().all(|v| v.is_finite() && *v >= 0.0));
+    let se_classical = model.covariance_matrix(&data, None).expect("classical SEs with t0");
+    assert_eq!(
+        (se_classical.nrows(), se_classical.ncols()),
+        (theta_dim, theta_dim),
+        "covariance with t0 should be (1 + p + q) × (1 + p + q)"
+    );
+    assert!(
+        se_classical.iter().all(|v| v.is_finite()),
+        "all covariance entries with t0 should be finite"
+    );
+    for d in 0..theta_dim {
+        let v = se_classical[[d, d]];
+        assert!(v.is_finite() && v >= 0.0, "diagonal variances with t0 should be non-negative");
+    }
     let forecast_val = model.forecast(3, &data).expect("forecast with t0");
     assert!(forecast_val.is_finite() && forecast_val > 0.0);
 }

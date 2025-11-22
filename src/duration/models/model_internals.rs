@@ -650,7 +650,7 @@ mod tests {
             scratch_bufs: scratch,
             results: None,
             fitted_params: None,
-            forecast: None,
+            forecast_result: None,
         };
 
         let data_full = ACDData::new(durations.clone(), None, meta.clone()).unwrap();
@@ -697,7 +697,7 @@ mod tests {
             scratch_bufs: scratch,
             results: None,
             fitted_params: None,
-            forecast: None,
+            forecast_result: None,
         };
 
         // Act
@@ -745,7 +745,7 @@ mod tests {
             scratch_bufs: scratch,
             results: None,
             fitted_params: None,
-            forecast: None,
+            forecast_result: None,
         };
 
         // θ̂ layout: (ω, α₁, β₁)
@@ -819,7 +819,7 @@ mod tests {
             scratch_bufs: scratch,
             results: None,
             fitted_params: None,
-            forecast: None,
+            forecast_result: None,
         };
 
         // θ̂ layout: (ω, α₁, β₁)

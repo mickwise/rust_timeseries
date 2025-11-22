@@ -35,6 +35,7 @@ class EscancianoLobato:
     -----
     The statistic is asymptotically χ²(1) under the null.
     """
+
     @overload
     def __init__(self, data: _ArrayLikeF64, /) -> None: ...
     @overload

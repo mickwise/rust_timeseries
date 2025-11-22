@@ -1,9 +1,9 @@
-//! inference::hessian — Hessian-based variance and standard error utilities.
+//! inference::hessian — Hessian-based covariance matrix utilities.
 //!
 //! Purpose
 //! -------
 //! Provide a thin wrapper around finite-difference Hessians that converts
-//! them into numerically stable variance and standard error estimates.
+//! them into numerically stable covariance matrix estimates.
 //! This module handles conversion between `ndarray` and `nalgebra` types
 //! and supports both classical and robust (sandwich) SEs built from the
 //! observed information and a score covariance matrix.
@@ -19,6 +19,8 @@
 //! - Compute robust (sandwich) standard errors when supplied with a
 //!   score covariance matrix `S` (IID OPG or HAC) on the average-score
 //!   scale.
+//! - Expose [`calc_covariance`] to return the full classical or robust
+//!   covariance matrix `Var(θ̂) = J⁺ S J⁺` (with `S = J` in the classical case).
 //!
 //! Invariants & assumptions
 //! ------------------------
@@ -37,24 +39,20 @@
 //! Conventions
 //! -----------
 //! - All Hessians are on the **average log-likelihood** scale (not the
-//!   sum), so the resulting variances/SEs correspond to that scaling.
-//! - Standard errors are returned as the square roots of diagonal
-//!   variances; no full covariance matrix is currently exposed by this
-//!   module.
-//! - No explicit matrix inverse is formed; all computations use
-//!   symmetric eigendecomposition with eigenvalue truncation.
-//! - Errors are reported via [`OptResult<T>`].
+//!   sum), so the resulting variances/SEs/covariances correspond to that scaling.
+//! - The covariance matrices returned are in the **unconstrained**
+//!   parameter space (θ-space) used by the optimizer, **not** in the
+//!   model-parameters space `(ω, α, β, slack - space)`.
 //!
 //! Downstream usage
 //! ----------------
 //! - Model layers (e.g., ACD models) call [`calc_standard_errors`] after
-//!   fitting to obtain classical or robust SEs at the MLE.
-//! - Robust SEs use a score covariance matrix `S` produced by
-//!   `inference::hac` (e.g., via
-//!   `inference::hac::calculate_avg_scores_cov`) and threaded through
-//!   model-side inference options.
-//! - Helper routines [`fill_dmatrix`], [`solve_for_se`], and
-//!   [`solve_for_se_robust`] are internal utilities; library users
+//!   fitting to obtain classical or robust covariance matrix at the MLE.
+//! - [`solve_for_robust_cov_matrix`] use a score covariance matrix `S` produced by
+//!   `inference::hac` (e.g., via `inference::hac::calculate_avg_scores_cov`)
+//!   and threaded through model-side inference options.
+//! - Helper routines [`fill_dmatrix`], [`solve_for_cov_matrix`] , and
+//!   [`solve_for_robust_cov_matrix`] are internal utilities; library users
 //!   should not need to invoke them directly.
 //!
 //! Testing notes
@@ -62,9 +60,9 @@
 //! - Unit tests in this module cover:
 //!   - Correct copying of Hessians from `ndarray` into `DMatrix`
 //!     without altering symmetry.
-//!   - Agreement between classical SEs and the diagonal of an analytic
-//!     `J⁺` for simple quadratic objectives.
-//!   - Robust SE behavior when `scores` is chosen to inflate variances
+//!   - Agreement between classical covariance estimates and an
+//!     analytic `J⁺` for simple quadratic objectives.
+//!   - Robust covariance behavior when `scores` is chosen to inflate variances
 //!     relative to the classical case.
 //! - Integration tests at the model layer verify that:
 //!   - SEs behave sensibly under reparameterizations.
@@ -77,107 +75,78 @@ use crate::optimization::{
 use nalgebra::DMatrix;
 use ndarray::{Array1, Array2};
 
-/// calc_standard_errors — standard errors from observed information.
+/// covariance_matrix — classical or HAC-robust covariance in θ-space.
 ///
 /// Purpose
 /// -------
-/// Compute classical or robust (sandwich) standard errors from the observed
-/// information matrix `J(θ̂)`, using eigen-based pseudoinverses. The observed
-/// information is built via finite-difference Hessians of an average
-/// log-likelihood gradient, then decomposed to produce per-parameter SEs.
+/// Compute the full covariance matrix of the **unconstrained** parameter
+/// vector θ used by the optimizer, evaluated at the MLE θ̂. By default it
+/// returns *classical* covariance based on the observed information; with
+/// [`HACOptions`] it returns *robust* (sandwich/HAC) covariance that
+/// accounts for serial correlation and heteroskedasticity in the scores.
 ///
 /// Parameters
 /// ----------
-/// - `f`: `&F`
-///   Gradient map of the **average** log-likelihood or negative
-///   average log-likelihood, `f: θ ↦ g(θ)`. f must be C¹ in a
-///   neighborhood of `theta_hat` so that [`compute_hessian`] can
-///   succeed.
-/// - `theta_hat`: `&Array1<f64>`
-///   Parameter vector `θ̂` at which the observed information is
-///   evaluated. Its length `n` determines the dimension of the Hessian
-///   and of the returned SE vector.
-/// - `scores`: `Option<&Array2<f64>>`
-///   Optional `n×n` score covariance matrix `S` on the *average-score*
-///   scale. When `None`, classical SEs are computed from `J(θ̂)` alone.
-///   When `Some(S)`, robust (sandwich) SEs are computed via
-///   `Var(θ̂_i) = w_iᵀ S w_i`, where `w_i` is the `i`-th column of the
-///   pseudoinverse `J⁺`.
+/// - `data`: `&ACDData`
+///   Observed duration series used both to re-evaluate the gradient
+///   (for the finite-difference Hessian) and to compute per-observation
+///   scores needed for HAC robustification.
+/// - `hac_opts`: `Option<&HACOptions>`
+///   - `None` for classical covariance based on the observed information
+///     matrix `J(θ̂)`.
+///   - `Some(opts)` for robust/HAC covariance using `opts.kernel`,
+///     `opts.bandwidth`, `opts.center`, and any small-sample corrections.
 ///
 /// Returns
 /// -------
-/// `OptResult<Array1<f64>>`
-///   On success, a length-`n` vector of standard errors corresponding to
-///   the entries of `theta_hat`. On failure, propagates the error from
-///   [`compute_hessian`] (e.g., invalid Hessian, non-finite entries).
+/// `ACDResult<Array2<f64>>`
+///   On success, an `k×k` covariance matrix `Var(θ̂)` in **θ-space**, where
+///   `k = 1 + p + q` is the dimension of the unconstrained optimizer vector.
+///   On failure, returns an [`ACDError`] indicating what went wrong.
 ///
 /// Errors
 /// ------
-/// - `OptError`  
-///   Any error that [`compute_hessian`] may return, such as Hessian
-///   dimension mismatches or non-finite entries detected by validation.
+/// - [`ACDError::ModelNotFitted`]
+///   Returned if no θ̂ is available because [`ACDModel::fit`] has not been
+///   called successfully.
+/// - Other [`ACDError`] variants
+///   Propagated from:
+///   - [`ACDModel::grad`] (during Hessian construction),
+///   - [`calculate_scores`] / [`calculate_avg_scores_cov`] (for HAC cases),
+///   - or any error mapped from the underlying optimization / inference
+///     machinery used by [`calc_covariance`].
 ///
 /// Panics
 /// ------
-/// - Never panics under the documented invariants. Any internal panic
-///   would indicate a programming error (e.g., dimension mismatch
-///   between `theta_hat` and `scores` in upstream code).
-///
-/// Safety
-/// ------
-/// - No `unsafe` code is used. Callers must ensure that, when provided,
-///   `scores` is `n×n` with `n = theta_hat.len()` and matches the same
-///   parameter ordering as `theta_hat`.
+/// - Never panics on invalid user inputs; such conditions are surfaced as
+///   [`ACDError`] values. Panics would indicate programmer errors
+///   (e.g., inconsistent shapes) rather than user-facing failures.
 ///
 /// Notes
 /// -----
-/// - The sign convention of `f` (log-likelihood vs negative
-///   log-likelihood) is absorbed into `compute_hessian`; `J(θ̂)` is
-///   interpreted as the observed information matrix on the average
-///   log-likelihood scale.
-/// - Eigenvalues with magnitude at most [`EIGEN_EPS`] are treated as
-///   zero when forming pseudoinverse directions, inflating SEs along
-///   weakly identified directions.
-/// - The robust branch does **not** change the point estimate `θ̂`; it
-///   only modifies the uncertainty quantification around it.
-///
-/// Examples
-/// --------
-/// ```rust
-/// # use ndarray::array;
-/// # use rust_timeseries::inference::hessian::calc_standard_errors;
-/// # use rust_timeseries::optimization::errors::OptResult;
-/// #
-/// // Simple quadratic: g(θ) = A θ, where A is PD.
-/// let a = array![[4.0, 0.0],
-///                [0.0, 1.0]];
-/// let f = |theta: &ndarray::Array1<f64>| -> ndarray::Array1<f64> {
-///     a.dot(theta)
-/// };
-/// let theta_hat = array![1.0, -1.0];
-///
-/// let se: OptResult<ndarray::Array1<f64>> =
-///     calc_standard_errors(&f, &theta_hat, None);
-/// assert!(se.is_ok());
-/// let se = se.unwrap();
-/// assert_eq!(se.len(), 2);
-/// // For diagonal A, classical SEs are ~[1/sqrt(4), 1/sqrt(1)].
-/// assert!((se[0] - 0.5).abs() < 1e-6);
-/// assert!((se[1] - 1.0).abs() < 1e-6);
-/// ```
-pub fn calc_standard_errors<F: Fn(&Array1<f64>) -> Array1<f64>>(
+/// - The covariance is **strictly in θ-space**, i.e. for the unconstrained
+///   optimizer parameters, _not_ for model-space parameters `(ω, α, β, slack)`.
+///   To obtain covariance for model-space parameters, apply a delta-method
+///   transform using the Jacobian of the softplus/softmax mapping.
+/// - Classical covariance is the Moore–Penrose pseudoinverse `J⁺` of the
+///   observed information matrix `J(θ̂)`, computed via symmetric
+///   eigendecomposition with eigenvalue truncation controlled by
+///   [`EIGEN_EPS`].
+/// - Robust/HAC covariance applies a sandwich formula `Var(θ̂) = J⁺ S J⁺`,
+///   where `S` is a HAC estimator of the covariance of the **average score**
+///   constructed from per-observation scores and the kernel/bandwidth in
+///   [`HACOptions`].
+pub fn calc_covariance<F: Fn(&Array1<f64>) -> Array1<f64>>(
     f: &F, theta_hat: &Array1<f64>, scores: Option<&Array2<f64>>,
-) -> OptResult<Array1<f64>> {
-    let n = theta_hat.len();
+) -> OptResult<Array2<f64>> {
     let obs_info = compute_hessian(f, theta_hat)?;
     let mut obs_info_nalg = DMatrix::<f64>::zeros(obs_info.nrows(), obs_info.ncols());
     fill_dmatrix(&obs_info, &mut obs_info_nalg);
     match scores {
-        Some(s) => Ok(solve_for_se_robust(obs_info_nalg, s, n)),
-        None => Ok(solve_for_se(obs_info_nalg, n)),
+        Some(s) => Ok(solve_for_robust_cov_matrix(obs_info_nalg, s)),
+        None => Ok(solve_for_cov_matrix(obs_info_nalg)),
     }
 }
-
 // ---- Helper methods ----
 
 /// fill_dmatrix — copy an `ndarray` Hessian into a `nalgebra::DMatrix`.
@@ -226,7 +195,7 @@ pub fn calc_standard_errors<F: Fn(&Array1<f64>) -> Array1<f64>>(
 ///   row-major traversal.
 /// - No symmetrization is performed here; any asymmetry present in
 ///   `obs_info` will be preserved in `obs_info_nalg`.
-fn fill_dmatrix(obs_info: &Array2<f64>, obs_info_nalg: &mut DMatrix<f64>) -> () {
+fn fill_dmatrix(obs_info: &Array2<f64>, obs_info_nalg: &mut DMatrix<f64>) {
     let n = obs_info.ncols();
     for j in 0..n {
         for i in j..n {
@@ -240,81 +209,52 @@ fn fill_dmatrix(obs_info: &Array2<f64>, obs_info_nalg: &mut DMatrix<f64>) -> () 
     }
 }
 
-/// solve_for_se — classical standard errors from observed information.
+/// solve_for_cov_matrix — classical covariance from observed information.
 ///
 /// Purpose
 /// -------
-/// Compute classical standard errors from a symmetric observed information
-/// matrix `J(θ̂)` using symmetric eigendecomposition and eigenvalue
-/// truncation. This corresponds to taking the square root of the diagonal
-/// of the Moore–Penrose pseudoinverse `J⁺`.
+/// Compute the classical covariance matrix as the Moore–Penrose
+/// pseudoinverse `J⁺` of a symmetric observed information matrix
+/// `J(θ̂)`, using symmetric eigendecomposition and eigenvalue
+/// truncation.
 ///
 /// Parameters
 /// ----------
 /// - `obs_info_nalg`: `DMatrix<f64>`
 ///   Symmetric `n×n` observed information matrix, typically produced by
 ///   [`fill_dmatrix`]. Consumed by the eigendecomposition.
-/// - `n`: `usize`
-///   Parameter dimension (length of `θ̂`). Must match the dimension of
-///   `obs_info_nalg`.
 ///
 /// Returns
 /// -------
-/// `Array1<f64>`
-///   Length-`n` vector of classical standard errors `SE(θ̂_i)` for each
-///   parameter.
-///
-/// Errors
-/// ------
-/// - `None`  
-///   This helper does not return a `Result`. Numerical breakdown (e.g.,
-///   NaNs from `symmetric_eigen`) would indicate a deeper issue upstream.
-///
-/// Panics
-/// ------
-/// - May panic if `obs_info_nalg` is not square or if its dimension does
-///   not match `n`. Such mismatches are considered programmer errors.
-///
-/// Safety
-/// ------
-/// - No `unsafe` code is used.
+/// `Array2<f64>`
+///   `n×n` classical covariance matrix `J⁺`, where small eigenvalues
+///   (≤ [`EIGEN_EPS`]) have been truncated.
 ///
 /// Notes
 /// -----
-/// - Eigenvalues `λ_k` with `λ_k ≤ EIGEN_EPS` are treated as zero and
-///   excluded from the variance sum, which inflates SEs along weakly
+/// - Eigenvalues `λ_k` with `λ_k ≤ EIGEN_EPS` are treated as zero when
+///   forming the pseudoinverse, inflating uncertainty along weakly
 ///   identified directions.
-/// - The implemented formula is:
-///   `Var(θ̂_i) = Σ_{k: λ_k > EIGEN_EPS} Q[i,k]^2 / λ_k`, and the return
-///   value is `sqrt(Var(θ̂_i))` for each `i`.
-/// - Here Q is the orthonormal matrix of eigenvectors from the
-///   symmetric eigendecomposition J = Q Λ Qᵀ
-fn solve_for_se(obs_info_nalg: DMatrix<f64>, n: usize) -> Array1<f64> {
-    let eigen_decomp = obs_info_nalg.symmetric_eigen();
-    let mut se = Array1::<f64>::zeros(n);
-    let q = eigen_decomp.eigenvectors;
-    let eigenvals = eigen_decomp.eigenvalues;
+fn solve_for_cov_matrix(obs_info_nalg: DMatrix<f64>) -> Array2<f64> {
+    let n = obs_info_nalg.ncols();
+    let pseudo_inv = pseudo_inverse(obs_info_nalg);
+    let mut cov = Array2::<f64>::zeros((n, n));
     for i in 0..n {
-        se[i] = eigenvals
-            .iter()
-            .enumerate()
-            .filter(|(_, lambda)| **lambda > EIGEN_EPS)
-            .map(|(k, &lambda)| q[(i, k)] * q[(i, k)] / lambda)
-            .sum();
-        se[i] = se[i].sqrt();
+        for j in 0..n {
+            cov[[i, j]] = pseudo_inv[(i, j)];
+        }
     }
-    se
+    cov
 }
 
-/// solve_for_se_robust — robust (sandwich) standard errors.
+/// solve_for_robust_cov_matrix — robust (sandwich) covariance.
 ///
 /// Purpose
 /// -------
-/// Compute robust (sandwich) standard errors by combining the pseudoinverse
-/// of the observed information matrix `H = J(θ̂)` with a score covariance
-/// matrix `S` on the average-score scale. For each parameter `i`, the
-/// routine constructs `w_i = H⁺ e_i` and computes
-/// `Var(θ̂_i) = w_iᵀ S w_i`, returning `sqrt(Var(θ̂_i))`.
+/// Compute robust (sandwich) covariance by combining the pseudoinverse
+/// `J⁺` of the observed information matrix `J(θ̂)` with a score
+/// covariance matrix `S` on the average-score scale. The resulting
+/// covariance is `Var(θ̂) = J⁺ S J⁺`.
 ///
 /// Parameters
 /// ----------
@@ -325,68 +265,88 @@ fn solve_for_se(obs_info_nalg: DMatrix<f64>, n: usize) -> Array1<f64> {
 ///   `n×n` score covariance matrix `S` on the *average-score* scale
 ///   (IID OPG or HAC). Must be symmetric and conformable with
 ///   `obs_info_nalg`.
-/// - `n`: `usize`
-///   Parameter dimension; must match the sizes of `obs_info_nalg` and
-///   `scores`.
 ///
 /// Returns
 /// -------
-/// `Array1<f64>`
-///   Length-`n` vector of robust standard errors `SE_robust(θ̂_i)`.
-///
-/// Errors
-/// ------
-/// - `None`  
-///   This helper does not return a `Result`. Numerical breakdown manifests
-///   as NaNs or panics inside the underlying linear algebra and indicates
-///   a deeper issue upstream.
-///
-/// Panics
-/// ------
-/// - May panic if `scores` does not have shape `n×n` or if
-///   `obs_info_nalg` is not `n×n`. Such cases are considered programmer
-///   errors.
-///
-/// Safety
-/// ------
-/// - No `unsafe` code is used. Callers are responsible for providing
-///   conformable, finite matrices.
+/// `Array2<f64>`
+///   `n×n` robust covariance matrix `Var(θ̂) = J⁺ S J⁺`.
 ///
 /// Notes
 /// -----
 /// - Eigenvalues `λ_k ≤ EIGEN_EPS` are discarded when constructing
-///   pseudoinverse columns `w_i`, which protects against division by very
-///   small eigenvalues while inflating variances along nearly flat
-///   directions.
-/// - This function computes **standard errors directly** (square roots of
-///   variances); callers should not apply an additional square root.
-/// - In well-specified cases where `S` is proportional to `J⁻¹`, robust
-///   SEs coincide with classical SEs up to that proportionality constant.
-fn solve_for_se_robust(obs_info_nalg: DMatrix<f64>, scores: &Array2<f64>, n: usize) -> Array1<f64> {
+///   `J⁺`, which protects against division by very small eigenvalues
+///   while inflating covariance along nearly flat directions.
+fn solve_for_robust_cov_matrix(obs_info_nalg: DMatrix<f64>, scores: &Array2<f64>) -> Array2<f64> {
+    let n = obs_info_nalg.ncols();
+    let pseudo_inv = pseudo_inverse(obs_info_nalg);
+
+    let mut scores_nalg = DMatrix::<f64>::zeros(scores.nrows(), scores.ncols());
+    for i in 0..scores.nrows() {
+        for j in 0..scores.ncols() {
+            scores_nalg[(i, j)] = scores[[i, j]];
+        }
+    }
+
+    let cov_nalg = &pseudo_inv * &scores_nalg * &pseudo_inv;
+    let mut cov = Array2::<f64>::zeros((n, n));
+    for i in 0..n {
+        for j in 0..n {
+            cov[[i, j]] = cov_nalg[(i, j)];
+        }
+    }
+    cov
+}
+
+/// pseudo_inverse — eigen-based Moore–Penrose pseudoinverse of a symmetric matrix.
+///
+/// Purpose
+/// -------
+/// Construct the Moore–Penrose pseudoinverse of a symmetric `n×n`
+/// matrix using symmetric eigendecomposition and eigenvalue truncation
+/// controlled by [`EIGEN_EPS`].
+///
+/// Parameters
+/// ----------
+/// - `obs_info_nalg`: `DMatrix<f64>`
+///   Symmetric `n×n` matrix to be pseudo-inverted (typically the observed
+///   information `J(θ̂)`). Consumed by the eigendecomposition.
+///
+/// Returns
+/// -------
+/// `DMatrix<f64>`
+///   `n×n` pseudoinverse `J⁺`, where eigenvalues `λ_k ≤ EIGEN_EPS` have
+///   been treated as zero.
+///
+/// Notes
+/// -----
+/// - The pseudoinverse is constructed as
+///   `J⁺ = Σ_{k: λ_k > EIGEN_EPS} (1 / λ_k) q_k q_kᵀ`, where `q_k` are
+///   the orthonormal eigenvectors of `J`.
+fn pseudo_inverse(obs_info_nalg: DMatrix<f64>) -> DMatrix<f64> {
+    let n = obs_info_nalg.ncols();
     let eigen_decomp = obs_info_nalg.symmetric_eigen();
-    let mut se = Array1::<f64>::zeros(n);
     let q = eigen_decomp.eigenvectors;
     let eigenvals = eigen_decomp.eigenvalues;
-    for i in 0..n {
-        let mut w_i = Array1::zeros(n);
-        for (k, &lambda) in eigenvals.iter().enumerate() {
-            if lambda > EIGEN_EPS {
-                let coeff = q[(i, k)] / lambda;
+
+    let mut pseudo_inv = DMatrix::<f64>::zeros(n, n);
+    for k in 0..n {
+        let lambda = eigenvals[k];
+        if lambda > EIGEN_EPS {
+            let coeff = 1.0 / lambda;
+            for i in 0..n {
                 for j in 0..n {
-                    w_i[j] += coeff * q[(j, k)];
+                    pseudo_inv[(i, j)] += coeff * q[(i, k)] * q[(j, k)];
                 }
             }
         }
-        se[i] = w_i.t().dot(scores).dot(&w_i);
-        se[i] = se[i].sqrt();
     }
-    se
+    pseudo_inv
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nalgebra::DVector;
+    use nalgebra::DMatrix;
     use ndarray::{Array1, Array2, array};
 
     // -------------------------------------------------------------------------
@@ -394,10 +354,10 @@ mod tests {
     // -----
     // These tests cover:
     // - Correct copying of Hessians from `ndarray` into `DMatrix`.
-    // - Classical SEs for simple quadratic objectives with known analytic
-    //   information matrices.
-    // - Robust SEs when the score covariance inflates variances relative
-    //   to the classical case.
+    // - Classical covariance for simple quadratic objectives with known
+    //   analytic information matrices.
+    // - Robust (sandwich) covariance inflation when the score covariance
+    //   increases variance relative to the classical case.
     //
     // They intentionally DO NOT cover:
     // - End-to-end ACD model inference or HAC bandwidth selection.
@@ -435,8 +395,8 @@ mod tests {
     #[test]
     // Purpose
     // -------
-    // Check that `calc_standard_errors` produces classical SEs equal to the
-    // diagonal of the analytic pseudoinverse for a simple diagonal quadratic.
+    // Check that `calc_covariance` produces a classical covariance matrix
+    // equal to the analytic pseudoinverse for a simple diagonal quadratic.
     //
     // Given
     // -----
@@ -446,67 +406,80 @@ mod tests {
     //
     // Expect
     // ------
-    // - Classical SEs are approximately [1/sqrt(4), 1/sqrt(1)] = [0.5, 1.0].
-    fn calc_standard_errors_diagonal_quadratic_matches_analytic_se() {
+    // - Classical covariance is approximately diag(1/4, 1).
+    fn calc_covariance_diagonal_quadratic_matches_analytic_inverse() {
         // Arrange
         let a = array![[4.0, 0.0], [0.0, 1.0]];
         let f = |theta: &Array1<f64>| -> Array1<f64> { a.dot(theta) };
         let theta_hat = array![1.0, -1.0];
 
         // Act
-        let se_res: OptResult<Array1<f64>> = calc_standard_errors(&f, &theta_hat, None);
+        let cov_res: OptResult<Array2<f64>> = calc_covariance(&f, &theta_hat, None);
 
         // Assert
-        assert!(se_res.is_ok());
-        let se = se_res.unwrap();
-        assert_eq!(se.len(), 2);
-        assert!((se[0] - 0.5).abs() < 1e-6);
-        assert!((se[1] - 1.0).abs() < 1e-6);
+        assert!(cov_res.is_ok());
+        let cov = cov_res.unwrap();
+        assert_eq!(cov.nrows(), 2);
+        assert_eq!(cov.ncols(), 2);
+
+        // Analytic J⁺ = diag(1/4, 1)
+        assert!((cov[[0, 0]] - 0.25).abs() < 1e-6);
+        assert!((cov[[1, 1]] - 1.0).abs() < 1e-6);
+        // Off-diagonals should be ~0 for a diagonal A.
+        assert!(cov[[0, 1]].abs() < 1e-8);
+        assert!(cov[[1, 0]].abs() < 1e-8);
     }
 
     #[test]
     // Purpose
     // -------
     // Verify that providing a score covariance matrix with larger variance
-    // inflates robust SEs relative to classical SEs.
+    // inflates robust covariance relative to classical covariance.
     //
     // Given
     // -----
-    // - An identity information matrix H = I_2 encoded directly as a
-    //   `DMatrix<f64>`.
+    // - An identity information matrix J = I_2 encoded via a linear
+    //   gradient map g(θ) = I θ.
     // - A score covariance S = 2 I_2, representing doubled variance.
     //
     // Expect
     // ------
-    // - Classical SEs are approximately [1.0, 1.0].
-    // - Robust SEs are approximately [sqrt(2), sqrt(2)] > classical SEs.
-    fn solve_for_se_robust_inflates_se_relative_to_classical_when_scores_are_larger() {
+    // - Classical covariance is approximately I_2.
+    // - Robust covariance is approximately 2 I_2 and strictly dominates
+    //   classical along the diagonal.
+    fn calc_covariance_robust_inflates_variance_relative_to_classical() {
         // Arrange
-        let h = DMatrix::<f64>::from_diagonal(&DVector::from_vec(vec![1.0, 1.0]));
+        let f = |theta: &Array1<f64>| -> Array1<f64> { theta.clone() };
+        let theta_hat = array![0.0, 0.0];
         let scores: Array2<f64> = array![[2.0, 0.0], [0.0, 2.0]];
-        let n = 2;
 
-        // Classical SEs with H = I_2
-        let se_classical = solve_for_se(h.clone(), n);
-
-        // Robust SEs with S = 2 I_2
-        let se_robust = solve_for_se_robust(h, &scores, n);
+        // Act
+        let cov_classical_res: OptResult<Array2<f64>> = calc_covariance(&f, &theta_hat, None);
+        let cov_robust_res: OptResult<Array2<f64>> = calc_covariance(&f, &theta_hat, Some(&scores));
 
         // Assert
-        assert_eq!(se_classical.len(), 2);
-        assert_eq!(se_robust.len(), 2);
+        assert!(cov_classical_res.is_ok());
+        assert!(cov_robust_res.is_ok());
 
-        // Classical: Var = 1, SE = 1
-        assert!((se_classical[0] - 1.0).abs() < 1e-8);
-        assert!((se_classical[1] - 1.0).abs() < 1e-8);
+        let cov_classical = cov_classical_res.unwrap();
+        let cov_robust = cov_robust_res.unwrap();
 
-        // Robust: Var = 2, SE = sqrt(2)
-        let sqrt2 = 2.0_f64.sqrt();
-        assert!((se_robust[0] - sqrt2).abs() < 1e-8);
-        assert!((se_robust[1] - sqrt2).abs() < 1e-8);
+        // Shapes
+        assert_eq!(cov_classical.nrows(), 2);
+        assert_eq!(cov_classical.ncols(), 2);
+        assert_eq!(cov_robust.nrows(), 2);
+        assert_eq!(cov_robust.ncols(), 2);
 
-        // And robust SEs should strictly dominate classical in this setup.
-        assert!(se_robust[0] > se_classical[0]);
-        assert!(se_robust[1] > se_classical[1]);
+        // Classical: Var ≈ 1 on both coordinates.
+        assert!((cov_classical[[0, 0]] - 1.0).abs() < 1e-8);
+        assert!((cov_classical[[1, 1]] - 1.0).abs() < 1e-8);
+
+        // Robust: Var ≈ 2 on both coordinates.
+        assert!((cov_robust[[0, 0]] - 2.0).abs() < 1e-8);
+        assert!((cov_robust[[1, 1]] - 2.0).abs() < 1e-8);
+
+        // Robust covariance should strictly dominate classical on the diagonal.
+        assert!(cov_robust[[0, 0]] > cov_classical[[0, 0]]);
+        assert!(cov_robust[[1, 1]] > cov_classical[[1, 1]]);
     }
 }

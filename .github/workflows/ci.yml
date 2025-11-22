@@ -51,14 +51,41 @@ jobs:
         run: |
           cd /tmp
           python - <<'PY'
+          import numpy as np
+
           import rust_timeseries
           print("OK:", rust_timeseries, rust_timeseries.__file__)
-      
+
+          # Statistical tests: Escanciano–Lobato
           from rust_timeseries.statistical_tests import EscancianoLobato
-          print("Found:", EscancianoLobato)
-      
-          import numpy as np
+          print("Found EscancianoLobato:", EscancianoLobato)
+
           data = np.random.randn(50)
           test = EscancianoLobato(data)
-          print("statistic:", test.statistic, "pvalue:", test.pvalue, "p_tilde:", test.p_tilde)
+          print("EL statistic:", test.statistic, "pvalue:", test.pvalue, "p_tilde:", test.p_tilde)
+
+          # Duration models: ACD(p, q)
+          from rust_timeseries.duration_models import ACD
+
+          # Use deterministic, well-behaved durations to avoid optimizer flakiness
+          durations = np.ones(50, dtype=np.float64)
+          model = ACD(data_length=len(durations), p=1, q=1)
+
+          # θ has length 1 + p + q = 3
+          theta0 = np.zeros(3, dtype=np.float64)
+
+          model.fit(durations, theta0)
+          psi_hat = model.forecast(durations, horizon=5)
+          cov = model.covariance_matrix(durations, robust=False)
+
+          cov = np.asarray(cov, dtype=np.float64)
+          print("ACD psi_hat(T+5):", psi_hat)
+          print("ACD cov shape:", cov.shape)
+
+          # Minimal sanity checks
+          assert cov.shape == (3, 3), "Unexpected covariance shape for (ω, α, β)"
+          assert np.all(np.isfinite(cov)), "Non-finite entries in covariance matrix"
+
+          print("Duration models smoke test: OK")
           PY
+
