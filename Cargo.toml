@@ -27,7 +27,7 @@ rand   = "0.8.0"
 statrs = { version = "0.18.0", features = ["rand"] }
 
 [features]
-default = []
+default = ["python-bindings"]
 obs_slog = ["dep:argmin-observer-slog"]
 
 # Turn Python bindings on/off cleanly

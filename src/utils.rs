@@ -10,7 +10,6 @@ use crate::{
         core::{
             data::ACDData, guards::PsiGuards, init::Init, options::ACDOptions, shape::ACDShape,
         },
-        errors::ACDError,
         models::acd::ACDModel,
     },
     inference::{hac::HACOptions, kernel::KernelType},
@@ -146,6 +145,8 @@ fn extract_mle_opts(
     tol_grad: Option<f64>, tol_cost: Option<f64>, max_iter: Option<usize>,
     line_searcher: Option<&str>, lbfgs_mem: Option<usize>,
 ) -> PyResult<MLEOptions> {
+    use std::str::FromStr;
+
     use crate::duration::errors::ACDError;
 
     // Tolerances::new -> OptResult<Tolerances> -> ACDError -> PyErr
@@ -164,10 +165,12 @@ fn extract_mle_opts(
 }
 
 #[cfg(feature = "python-bindings")]
-fn extract_acd_data<'py>(
+pub fn extract_acd_data<'py>(
     py: Python<'py>, durations: &Bound<'py, PyAny>, unit: Option<&str>, t0: Option<usize>,
     diurnal_adjusted: Option<bool>,
 ) -> PyResult<ACDData> {
+    use crate::duration::core::{data::ACDMeta, units::ACDUnit};
+
     let dur_arr = extract_f64_array(py, durations)?;
     let dur_slice = dur_arr.as_slice().map_err(|_| {
         PyValueError::new_err("durations must be a 1-D contiguous float64 array or sequence")
@@ -187,7 +190,12 @@ fn extract_acd_data<'py>(
     };
     let diurnal_flag = diurnal_adjusted.unwrap_or(false);
     let meta = ACDMeta::new(acd_unit, None, diurnal_flag);
-    ACDData::new(dur_vec, t0, meta)
+    let model = ACDData::new(dur_vec, t0, meta);
+    match model {
+        Ok(data) => Ok(data),
+        Err(e) => Err(e.into()),
+        
+    }
 }
 
 #[cfg(feature = "python-bindings")]
