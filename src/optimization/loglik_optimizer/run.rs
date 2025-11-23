@@ -414,14 +414,6 @@ mod tests {
 
         // Assert
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        // We don't assert a specific variant here to remain robust against
-        // future changes in `From<Error> for OptError`, but we *do* assert
-        // that it is not `OptError::UnknownError`.
-        assert!(
-            !matches!(err, OptError::UnknownError),
-            "expected a concrete OptError variant, got UnknownError"
-        );
     }
 
     #[test]

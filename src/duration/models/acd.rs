@@ -270,7 +270,7 @@ impl ACDModel {
     ///   - `theta0[0]` is the log-parameter mapped to `ω` via softplus, and
     ///   - `theta0[1..]` are logits for the α/β/slack weights in the scaled
     ///     softmax mapping.
-    ///   Ownership is moved into the optimizer; no internal clone is taken.
+    /// - Ownership is moved into the optimizer; no internal clone is taken.
     /// - `data`: `&ACDData`
     ///   Observed duration series used to evaluate the log-likelihood.
     ///
@@ -317,7 +317,7 @@ impl ACDModel {
         let mut workspace =
             WorkSpace::new(workspace_alpha.view_mut(), workspace_beta.view_mut(), &self.shape)?;
         workspace.update(theta_hat)?;
-        compute_psi(&workspace, data, &self);
+        compute_psi(&workspace, data, self);
         let psi_lags = self.scratch_bufs.psi_buf.borrow();
         self.fitted_params = Some(ACDParams::from_theta(
             self.results.as_ref().unwrap().theta_hat.view(),
@@ -376,7 +376,7 @@ impl ACDModel {
         let duration_lags = data.data.slice(s![n - q..]);
         let fitted_params = self.fitted_params.as_ref().ok_or(ACDError::ModelNotFitted)?;
         let h_forecast = forecast_recursion(
-            &fitted_params,
+            fitted_params,
             duration_lags,
             horizon,
             &forecast_result,
@@ -466,8 +466,8 @@ impl ACDModel {
         };
         let theta_space_cov = match hac_opts {
             Some(hac) => {
-                let raw_scores = calculate_scores(&self, data)?;
-                let avg_scores = calculate_avg_scores_cov(&hac, &raw_scores);
+                let raw_scores = calculate_scores(self, data)?;
+                let avg_scores = calculate_avg_scores_cov(hac, &raw_scores);
                 calc_covariance(&calc_grad, theta_hat, Some(&avg_scores))
             }
             None => calc_covariance(&calc_grad, theta_hat, None),
@@ -479,7 +479,7 @@ impl ACDModel {
 
         match theta_space_cov {
             Err(e) => Err(e.into()),
-            Ok(theta_space_cov) => Ok(delta_method(&theta_space_cov, &theta_hat, alpha, beta)),
+            Ok(theta_space_cov) => Ok(delta_method(&theta_space_cov, theta_hat, alpha, beta)),
         }
     }
 }
@@ -520,7 +520,7 @@ impl LogLikelihood for ACDModel {
         let mut workspace =
             WorkSpace::new(workspace_alpha.view_mut(), workspace_beta.view_mut(), &self.shape)?;
         workspace.update(theta.view())?;
-        Ok(likelihood_driver(&self, &workspace, &data)?)
+        Ok(likelihood_driver(self, &workspace, data)?)
     }
 
     /// Validate an unconstrained parameter vector `θ`.
@@ -608,7 +608,7 @@ impl LogLikelihood for ACDModel {
         let mut state = Array1::zeros(1 + p + q);
 
         walk_observations(
-            &self,
+            self,
             data,
             theta.view(),
             &mut state,

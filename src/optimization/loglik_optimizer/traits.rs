@@ -306,13 +306,13 @@ impl MLEOptions {
     pub fn new(
         tols: Tolerances, line_searcher: LineSearcher, lbfgs_mem: Option<usize>,
     ) -> OptResult<Self> {
-        if let Some(m) = lbfgs_mem {
-            if m == 0 {
-                return Err(OptError::InvalidLBFGSMem {
-                    mem: m,
-                    reason: "L-BFGS memory must be greater than zero.",
-                });
-            }
+        if let Some(m) = lbfgs_mem
+            && m == 0
+        {
+            return Err(OptError::InvalidLBFGSMem {
+                mem: m,
+                reason: "L-BFGS memory must be greater than zero.",
+            });
         }
         Ok(Self { tols, line_searcher, lbfgs_mem })
     }
@@ -501,13 +501,13 @@ impl Tolerances {
         }
         verify_tol_cost(tol_cost)?;
         verify_tol_grad(tol_grad)?;
-        if let Some(max_iter) = max_iter {
-            if max_iter == 0 {
-                return Err(OptError::InvalidMaxIter {
-                    max_iter,
-                    reason: "Maximum iterations must be greater than zero.",
-                });
-            }
+        if let Some(max_iter) = max_iter
+            && max_iter == 0
+        {
+            return Err(OptError::InvalidMaxIter {
+                max_iter,
+                reason: "Maximum iterations must be greater than zero.",
+            });
         }
         Ok(Self { tol_grad, tol_cost, max_iter })
     }

@@ -312,7 +312,7 @@ pub fn compute_hessian<F: Fn(&Theta) -> Grad>(f: &F, theta: &Theta) -> OptResult
 /// symmetrize_hess(&mut h);
 /// assert_eq!(h[[0, 1]], h[[1, 0]]);
 /// ```
-fn symmetrize_hess(hess: &mut Hessian) -> () {
+fn symmetrize_hess(hess: &mut Hessian) {
     for i in 0..hess.nrows() {
         for j in 0..i {
             let avg = 0.5 * (hess[[i, j]] + hess[[j, i]]);

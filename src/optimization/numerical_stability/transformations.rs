@@ -292,7 +292,7 @@ pub fn safe_softmax<'a>(
     Zip::from(beta)
         .and(&theta.slice(ndarray::s![q..q + p]))
         .for_each(|b, &v| *b = ((v - max_x).exp() / sum_exp_x) * scale);
-    return scale * (-max_x).exp() / sum_exp_x;
+    scale * (-max_x).exp() / sum_exp_x
 }
 
 /// `safe_softmax_deriv` — Jacobian–vector product for the `(α, β)` softmax.
@@ -375,7 +375,7 @@ pub fn safe_softmax<'a>(
 /// ```
 pub fn safe_softmax_deriv(
     alpha: &ArrayViewMut1<f64>, beta: &ArrayViewMut1<f64>, theta: &mut ArrayViewMut1<f64>,
-) -> () {
+) {
     let q = alpha.len();
     let p = beta.len();
     let alpha_slice = &theta.slice(s![0..q]);
@@ -437,7 +437,7 @@ pub fn safe_softmax_deriv(
 /// ```
 pub fn safe_logistic(x: f64) -> f64 {
     if x > 20.0 {
-        return 1.0;
+        1.0
     } else if x >= 0.0 {
         let exp_neg_x = (-x).exp();
         1.0 / (1.0 + exp_neg_x)
@@ -549,10 +549,10 @@ fn apply_jt(
     let mut alpha_tmp = alpha.clone();
     let mut beta_tmp = beta.clone();
     {
-        let mut alpha_view = alpha_tmp.view_mut();
-        let mut beta_view = beta_tmp.view_mut();
+        let alpha_view = alpha_tmp.view_mut();
+        let beta_view = beta_tmp.view_mut();
         let mut tmp_view = tmp.view_mut();
-        safe_softmax_deriv(&mut alpha_view, &mut beta_view, &mut tmp_view);
+        safe_softmax_deriv(&alpha_view, &beta_view, &mut tmp_view);
     }
 
     out.slice_mut(s![1..]).assign(&tmp);

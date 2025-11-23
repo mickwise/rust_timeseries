@@ -37,8 +37,8 @@
 //! Conventions
 //! -----------
 //! - Time indexing is 0-based for code, but ψ–recursions conceptually follow
-//!   the Engle–Russell convention
-//!     `ψ_t = ω + Σ_{i=1..q} α_i τ_{t−i} + Σ_{j=1..p} β_j ψ_{t−j}`.
+//!   the Engle–Russell convention:
+//!     - `ψ_t = ω + Σ_{i=1..q} α_i τ_{t−i} + Σ_{j=1..p} β_j ψ_{t−j}`.
 //! - Lag buffers store the newest element at the end; windows used in the
 //!   recursions are reversed tails (newest → oldest) to align with
 //!   `[·_{t−1}, …, ·_{t−k}]`.
@@ -134,7 +134,7 @@ use ndarray::{Axis, s};
 /// compute_psi(&params, &data, &model);
 /// # // ψ values are now stored in model.scratch_bufs.psi_buf[p..p + n].
 /// ```
-pub fn compute_psi(params: &WorkSpace, duration_data: &ACDData, model_spec: &ACDModel) -> () {
+pub fn compute_psi(params: &WorkSpace, duration_data: &ACDData, model_spec: &ACDModel) {
     let p = model_spec.shape.p;
 
     extract_init(
@@ -164,8 +164,8 @@ pub fn compute_psi(params: &WorkSpace, duration_data: &ACDData, model_spec: &ACD
 /// -------
 /// `ACDResult<f64>`
 ///   - `Ok(log_likelihood)` with the scalar log-likelihood:
-///       `ℓ(θ) = Σ_t log f_ε(τ_t / ψ_t) − log ψ_t`
-///     over all in-sample observations after optional burn-in.
+///       - `ℓ(θ) = Σ_t log f_ε(τ_t / ψ_t) − log ψ_t`
+///   - over all in-sample observations after optional burn-in.
 ///   - `Err(..)` if the innovation PDF/log-PDF fails or a downstream
 ///     validation error is encountered.
 ///
@@ -266,9 +266,7 @@ pub fn likelihood_driver(
 /// compute_derivative(&params, &data, &model);
 /// # // model.scratch_bufs.deriv_buf now holds ∂ψ_t/∂θ rows.
 /// ```
-pub fn compute_derivative(
-    params: &WorkSpace, duration_data: &ACDData, model_spec: &ACDModel,
-) -> () {
+pub fn compute_derivative(params: &WorkSpace, duration_data: &ACDData, model_spec: &ACDModel) {
     let p = model_spec.shape.p;
     extract_init_derivative(model_spec, &model_spec.options.init, params, p);
     recursion_loop_derivative(model_spec, duration_data, params, duration_data.data.len());
@@ -404,7 +402,7 @@ pub fn guard_psi(value: f64, guards: &PsiGuards) -> f64 {
 /// ```
 fn extract_init(
     model_spec: &ACDModel, init_specs: &Init, uncond_mean: f64, sample_mean: f64, p: usize,
-) -> () {
+) {
     let mut binding = model_spec.scratch_bufs.psi_buf.borrow_mut();
     let mut init_psi_buf = binding.slice_mut(s![..p]);
     let mut init_dur_buf = model_spec.scratch_bufs.dur_buf.borrow_mut();
@@ -475,7 +473,7 @@ fn extract_init(
 ///   μ = ω / (1 − ∑α − ∑β), and derivatives are:
 ///   - ∂μ/∂ω   = 1 / (1 − ∑α − ∑β) ≈ `1 / (params.slack + STATIONARITY_MARGIN)`
 ///   - ∂μ/∂αᵢ  = ∂μ/∂βⱼ = ω / (1 − ∑α − ∑β)²
-///   These are written into the ω, α, β columns, and replicated across the
+/// - These are written into the ω, α, β columns, and replicated across the
 ///   first `p` rows.
 /// - For `Init::SampleMean` and all `Init::Fixed*` variants, initial ψ-lags
 ///   are treated as constants w.r.t. θ, so the corresponding derivative rows
@@ -492,9 +490,7 @@ fn extract_init(
 /// extract_init_derivative(&model, &Init::UncondMean, &workspace, p);
 /// # // deriv_buf[..p, ..] now holds ∂ψ_lag/∂θ rows.
 /// ```
-fn extract_init_derivative(
-    model_spec: &ACDModel, init_specs: &Init, params: &WorkSpace, p: usize,
-) -> () {
+fn extract_init_derivative(model_spec: &ACDModel, init_specs: &Init, params: &WorkSpace, p: usize) {
     let mut binding = model_spec.scratch_bufs.deriv_buf.borrow_mut();
     let mut init_psi_deriv_buf = binding.slice_mut(s![..p, ..]);
     match init_specs {
@@ -520,7 +516,7 @@ fn extract_init_derivative(
 ///   - `shape.p`, `shape.q` for the ACD orders,
 ///   - `options.psi_guards` for clamping,
 ///   - scratch buffers `psi_buf` and `dur_buf`.
-///   The first `p` entries of `psi_buf` and the first `q` entries of `dur_buf`
+/// - The first `p` entries of `psi_buf` and the first `q` entries of `dur_buf`
 ///   must already be initialized by [`extract_init`].
 /// - `duration_data`: `&ACDData`
 ///   Observed duration series of length `n` used to build the τ-lag vectors.
@@ -539,9 +535,9 @@ fn extract_init_derivative(
 ///
 /// Side effects
 /// ------------
-/// - For each `t` in `0..n`, computes
-///     `ψ_t = ω + αᵀ[τ_{t-1}, …, τ_{t-q}] + βᵀ[ψ_{t-1}, …, ψ_{t-p}]`
-///   and stores it at `psi_buf[p + t]`, after applying [`guard_psi`].
+/// - For each `t` in `0..n`, computes:
+///     - `ψ_t = ω + αᵀ[τ_{t-1}, …, τ_{t-q}] + βᵀ[ψ_{t-1}, …, ψ_{t-p}]`
+/// - and stores it at `psi_buf[p + t]`, after applying [`guard_psi`].
 ///
 /// Errors
 /// ------
@@ -577,9 +573,7 @@ fn extract_init_derivative(
 /// recursion_loop(&model, &data, &ws, n);
 /// # // ψ values are now in model.scratch_bufs.psi_buf[p..p + n].
 /// ```
-fn recursion_loop(
-    model_spec: &ACDModel, duration_data: &ACDData, params: &WorkSpace, n: usize,
-) -> () {
+fn recursion_loop(model_spec: &ACDModel, duration_data: &ACDData, params: &WorkSpace, n: usize) {
     let p = model_spec.shape.p;
     let q = model_spec.shape.q;
     let psi_guards = &model_spec.options.psi_guards;
@@ -621,7 +615,7 @@ fn recursion_loop(
 ///     - `psi_buf` holding ψ-lags and in-sample ψ values,
 ///     - `deriv_buf` of shape `(n + p, 1 + q + p)` used to store
 ///       ∂ψ_t/∂θ rows.
-///   The first `p` rows of `deriv_buf` must already have been seeded by
+/// - The first `p` rows of `deriv_buf` must already have been seeded by
 ///   [`extract_init_derivative`], and ψ-lags must be present in `psi_buf`.
 /// - `duration_data`: `&ACDData`
 ///   Observed durations of length `n` used to build τ-lag vectors.
@@ -665,7 +659,7 @@ fn recursion_loop(
 /// - Duration lags are constructed exactly as in [`recursion_loop`], via:
 ///   - `k_init = max(0, q − t)` lags from `dur_buf`,
 ///   - `k_data = q − k_init` lags from `duration_data.data`,
-///   both read in reverse to align with `[τ_{t-1}, …, τ_{t-q}]`.
+/// - both read in reverse to align with `[τ_{t-1}, …, τ_{t-q}]`.
 /// - ψ-lags are read from `psi_buf[t .. t + p]` for the β block.
 /// - Each derivative row is **zeroed** before being filled to avoid stale
 ///   values from previous runs.
@@ -675,7 +669,7 @@ fn recursion_loop(
 ///   * an additive term `Σ_{i ∈ pre} α_i · ∂μ/∂ω` in the ω column, and
 ///   * a constant shift `Σ_{i ∈ pre} α_i · ∂μ/∂α_j` / `∂μ/∂β_j` applied
 ///     uniformly across the α and β columns for that row,
-///   where the sum runs over α-weights on pre-sample lags.
+/// - where the sum runs over α-weights on pre-sample lags.
 /// - This routine does not itself apply ψ-guards; it differentiates the
 ///   unconstrained recursion and then applies β-feedback. Guarding behavior
 ///   is accounted for in how ψ is computed upstream.
@@ -692,7 +686,7 @@ fn recursion_loop(
 /// ```
 fn recursion_loop_derivative(
     model_spec: &ACDModel, duration_data: &ACDData, params: &WorkSpace, n: usize,
-) -> () {
+) {
     let p = model_spec.shape.p;
     let q = model_spec.shape.q;
     let omega = params.omega;
@@ -792,8 +786,7 @@ fn calculate_alpha_sum_for_uncond_mean(
     match model_spec.options.init {
         Init::UncondMean => {
             let alpha = &params.alpha;
-            let additional_duration_deriv = alpha.slice(s![..k_init]).sum();
-            return additional_duration_deriv;
+            alpha.slice(s![..k_init]).sum()
         }
         _ => 0.0,
     }

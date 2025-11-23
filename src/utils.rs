@@ -11,15 +11,17 @@ use pyo3::{exceptions::PyValueError, prelude::*, types::PyAny};
 use crate::{
     duration::{
         core::{
-            data::{ACDData, ACDMeta}, guards::PsiGuards, init::Init, options::ACDOptions, shape::ACDShape,
+            data::{ACDData, ACDMeta},
+            guards::PsiGuards,
+            init::Init,
+            options::ACDOptions,
+            shape::ACDShape,
             units::ACDUnit,
         },
         models::acd::ACDModel,
     },
     inference::{hac::HACOptions, kernel::KernelType},
-    optimization::{
-        loglik_optimizer::traits::{LineSearcher, MLEOptions, Tolerances},
-    },
+    optimization::loglik_optimizer::traits::{LineSearcher, MLEOptions, Tolerances},
 };
 
 #[cfg(feature = "python-bindings")]
@@ -151,8 +153,11 @@ fn extract_mle_opts(
     tol_grad: Option<f64>, tol_cost: Option<f64>, max_iter: Option<usize>,
     line_searcher: Option<&str>, lbfgs_mem: Option<usize>,
 ) -> PyResult<MLEOptions> {
-    if tol_grad == None && tol_cost == None && max_iter == None
-        && line_searcher == None && lbfgs_mem == None
+    if tol_grad == None
+        && tol_cost == None
+        && max_iter == None
+        && line_searcher == None
+        && lbfgs_mem == None
     {
         return Ok(MLEOptions::default());
     }

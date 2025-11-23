@@ -63,7 +63,7 @@ use argmin::core::{ArgminError, Error};
 use crate::duration::errors::{ACDError, ParamError};
 
 #[cfg(feature = "python-bindings")]
-use pyo3::{exceptions::PyValueError, PyErr};
+use pyo3::{PyErr, exceptions::PyValueError};
 
 /// Crate-wide result alias for optimizer operations.
 pub type OptResult<T> = Result<T, OptError>;
@@ -246,7 +246,7 @@ pub enum OptError {
     InvalidThetaInput { index: usize, value: f64 },
 
     // ---- Fallback ----
-    UnknownError,
+    UnknownError { message: String },
 }
 
 impl std::error::Error for OptError {}
@@ -388,8 +388,8 @@ impl std::fmt::Display for OptError {
             }
 
             // ---- Fallback ----
-            OptError::UnknownError => {
-                write!(f, "Unknown error")
+            OptError::UnknownError { message } => {
+                write!(f, "Unknown OptError error: {message}")
             }
         }
     }
@@ -413,7 +413,7 @@ impl From<Error> for OptError {
                 ArgminError::CheckpointNotFound { text } => OptError::CheckPointNotFound { text },
                 ArgminError::PotentialBug { text } => OptError::PotentialBug { text },
                 ArgminError::ImpossibleError { text } => OptError::ImpossibleError { text },
-                _ => OptError::UnknownError,
+                _ => OptError::UnknownError { message: format!("{argmin_error}") },
             },
             Err(err) => OptError::BackendError { text: err.to_string() },
         }
@@ -428,7 +428,7 @@ impl From<ACDError> for OptError {
             ACDError::InvalidExpParam => OptError::InvalidExpParam,
             ACDError::ScaleInvalid => OptError::ScaleInvalid,
             ACDError::ShapeInvalid => OptError::ShapeInvalid,
-            _ => OptError::UnknownError,
+            _ => OptError::UnknownError { message: format!("{err}") },
         }
     }
 }
@@ -455,7 +455,7 @@ impl From<ParamError> for OptError {
             ParamError::InvalidThetaInput { index, value } => {
                 OptError::InvalidThetaInput { index, value }
             }
-            _ => OptError::UnknownError,
+            _ => OptError::UnknownError { message: format!("{err}") },
         }
     }
 }

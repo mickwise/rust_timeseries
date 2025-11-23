@@ -406,7 +406,7 @@ where
             .enumerate()
             .map(|(idx, (row, x, psi))| ObsEntry { idx, deriv_row: row, data_point: x, psi })
             .try_for_each(|elem| step(elem, state))?;
-        finish(&workspace, state)?;
+        finish(workspace, state)?;
         Ok(())
     };
     with_workspace(model, data, loop_closure, theta_hat.view())?;

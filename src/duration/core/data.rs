@@ -178,10 +178,10 @@ impl ACDData {
             }
         }
 
-        if let Some(t0_val) = t0 {
-            if t0_val >= data.len() {
-                return Err(ACDError::T0OutOfRange { t0: t0_val, len: data.len() });
-            }
+        if let Some(t0_val) = t0
+            && t0_val >= data.len()
+        {
+            return Err(ACDError::T0OutOfRange { t0: t0_val, len: data.len() });
         }
 
         Ok(ACDData { data, t0, meta })

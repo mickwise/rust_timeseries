@@ -181,7 +181,7 @@ impl ACDScratch {
     ///   - `psi_buf`: length `n + p`
     ///   - `dur_buf`: length `q`
     ///   - `deriv_buf`: shape `(n + p, 1 + q + p)`
-    ///   All buffers are zero-initialized.
+    /// - All buffers are zero-initialized.
     ///
     /// Errors
     /// ------
@@ -425,7 +425,7 @@ impl ACDParams {
         let mut beta = Array1::zeros(p);
         let omega = safe_softplus(theta[0]);
         let log_odds = &theta.slice(s![1..]);
-        let slack = safe_softmax(alpha.view_mut(), beta.view_mut(), &log_odds);
+        let slack = safe_softmax(alpha.view_mut(), beta.view_mut(), log_odds);
         validate_omega(omega)?;
         validate_alpha(alpha.view(), q)?;
         validate_beta(beta.view(), p)?;
@@ -557,7 +557,7 @@ impl ACDParams {
     ///   Writes normalized probabilities in place:
     ///   - `θ[1 .. 1+q)  = α_i * denom_inv`
     ///   - `θ[1+q .. 1+q+p) = β_j * denom_inv`
-    ///   leaving `θ[0]` untouched.
+    /// - leaving `θ[0]` untouched.
     ///
     /// Errors
     /// ------

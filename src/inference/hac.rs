@@ -432,7 +432,7 @@ pub fn calculate_avg_scores_cov(hac_opts: &HACOptions, raw_scores: &Array2<f64>)
 fn add_hac_component(
     avg_scores: &mut Array2<f64>, scores: &Array2<f64>, lag: usize, bandwidth: usize,
     hac_opts: &HACOptions,
-) -> () {
+) {
     let n = scores.nrows();
     let weight = hac_opts.kernel.weight(lag as f64 / (bandwidth + 1) as f64);
     match lag {

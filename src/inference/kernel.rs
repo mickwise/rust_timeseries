@@ -253,7 +253,7 @@ impl KernelType {
     ///   - `KernelType::Parzen`: uses `L ≈ 2.6614 · (n·α(2))^{1/5}`.
     ///   - `KernelType::QuadraticSpectral`: uses
     ///     `L ≈ 1.3221 · (n·α(2))^{1/5}`.
-    ///   If `calc_opt_bandwidth_param` fails, returns
+    /// - If `calc_opt_bandwidth_param` fails, returns
     ///   `⌊n^{1/4}⌉` as a conservative fallback.
     ///
     /// Errors

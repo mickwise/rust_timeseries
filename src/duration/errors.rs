@@ -69,7 +69,7 @@ use crate::optimization::errors::OptError;
 use statrs::distribution::{ExpError, GammaError, WeibullError};
 
 #[cfg(feature = "python-bindings")]
-use pyo3::{exceptions::PyValueError, PyErr};
+use pyo3::{PyErr, exceptions::PyValueError};
 
 /// Crate-wide result alias for ACD operations that may produce [`ACDError`].
 pub type ACDResult<T> = Result<T, ACDError>;
@@ -153,7 +153,7 @@ pub type ParamResult<T> = Result<T, ParamError>;
 /// - `UnknownError`
 ///   Fallback for errors that cannot be mapped more precisely, including
 ///   some external library failures and unmapped `ParamError`/`OptError`
-///   variants.
+///   variants. Includes a string message for debugging.
 ///
 /// Invariants
 /// ----------
@@ -286,7 +286,9 @@ pub enum ACDError {
     },
 
     /// ---- Fallback ----
-    UnknownError,
+    UnknownError {
+        message: String,
+    },
 }
 
 impl std::error::Error for ACDError {}
@@ -393,8 +395,8 @@ impl std::fmt::Display for ACDError {
             ACDError::ShapeInvalid => {
                 write!(f, "Weibull distribution shape parameter must be > 0.")
             }
-            ACDError::UnknownError => {
-                write!(f, "An unknown error occurred.")
+            ACDError::UnknownError { message } => {
+                write!(f, "Unknown ACDError: {message}")
             }
 
             // ---- ParamError ----
@@ -452,7 +454,7 @@ impl From<WeibullError> for ACDError {
         match err {
             WeibullError::ScaleInvalid => ACDError::ScaleInvalid,
             WeibullError::ShapeInvalid => ACDError::ShapeInvalid,
-            _ => ACDError::UnknownError,
+            _ => ACDError::UnknownError { message: format!("{err:?}") },
         }
     }
 }
@@ -464,7 +466,7 @@ impl From<GammaError> for ACDError {
                 param: 0.0,
                 reason: "Shape parameter must be > 0.",
             },
-            _ => ACDError::UnknownError,
+            _ => ACDError::UnknownError { message: format!("{err:?}") },
         }
     }
 }
@@ -478,7 +480,7 @@ impl From<ParamError> for ACDError {
             ParamError::BetaLengthMismatch { expected, actual } => {
                 ACDError::BetaLengthMismatch { expected, actual }
             }
-            _ => ACDError::UnknownError,
+            _ => ACDError::UnknownError { message: format!("{err:?}") },
         }
     }
 }
@@ -492,7 +494,7 @@ impl From<OptError> for ACDError {
             OptError::InvalidHessian { row, col, value } => {
                 ACDError::InvalidHessian { row, col, value }
             }
-            _ => ACDError::UnknownError,
+            _ => ACDError::UnknownError { message: format!("{err:?}") },
         }
     }
 }
@@ -534,6 +536,7 @@ impl From<OptError> for ACDError {
 /// - `UnknownError`
 ///   Fallback for errors that cannot be mapped more precisely, including
 ///   unmapped [`ACDError`] variants in the `From<ACDError>` conversion.
+///   Includes a string message for debugging.
 ///
 /// Invariants
 /// ----------
@@ -595,7 +598,9 @@ pub enum ParamError {
     },
 
     /// ---- Fallback ----
-    UnknownError,
+    UnknownError {
+        message: String,
+    },
 }
 
 impl std::error::Error for ParamError {}
@@ -645,8 +650,8 @@ impl std::fmt::Display for ParamError {
             ParamError::InvalidPsiLags { index, value } => {
                 write!(f, "Psi lag at index {index} must be finite and > 0, got {value}")
             }
-            ParamError::UnknownError => {
-                write!(f, "An unknown error occurred in parameter validation.")
+            ParamError::UnknownError { message } => {
+                write!(f, "Unknown ParamError: {message}")
             }
         }
     }
@@ -656,7 +661,7 @@ impl std::fmt::Display for ParamError {
 #[cfg(feature = "python-bindings")]
 impl std::convert::From<ParamError> for PyErr {
     fn from(err: ParamError) -> PyErr {
-        PyValueError::new_err(format!("PARAMError: {err:?}"))
+        PyValueError::new_err(format!("ParamError: {err:?}"))
     }
 }
 
@@ -669,7 +674,7 @@ impl From<ACDError> for ParamError {
             ACDError::InvalidPsiLags { index, value } => {
                 ParamError::InvalidPsiLags { index, value }
             }
-            _ => Self::UnknownError,
+            _ => Self::UnknownError { message: format!("{err:?}") },
         }
     }
 }

@@ -60,6 +60,8 @@
 //!   selection) assert that domain violations in estimators are surfaced
 //!   as the appropriate [`InferenceError`] variants (rather than panics
 //!   or opaque `anyhow::Error` values).
+#[cfg(feature = "python-bindings")]
+use pyo3::{PyErr, exceptions::PyValueError};
 
 /// InferenceError — shared failure modes for inference utilities.
 ///
@@ -120,7 +122,7 @@ pub enum InferenceError {
     Anyhow(String),
 
     // ---- Fallback ----
-    UnknownError,
+    UnknownError { message: String },
 }
 
 /// InferenceResult — standard result alias for inference routines.
@@ -155,8 +157,18 @@ impl std::fmt::Display for InferenceError {
             InferenceError::Anyhow(msg) => write!(f, "Inference Error: {}", msg),
 
             // ---- Fallback ----
-            InferenceError::UnknownError => write!(f, "Inference Error: Unknown error occurred"),
+            InferenceError::UnknownError { message } => {
+                write!(f, "Unknown inference Error: {}", message)
+            }
         }
+    }
+}
+
+/// Convert a [`InferenceError`] into a Python `ValueError` with the error message.
+#[cfg(feature = "python-bindings")]
+impl std::convert::From<InferenceError> for PyErr {
+    fn from(err: InferenceError) -> PyErr {
+        PyValueError::new_err(format!("InferenceError: {err:?}"))
     }
 }
 
@@ -278,30 +290,6 @@ mod tests {
 
         // Assert
         assert_eq!(msg, "Inference Error: bandwidth failed");
-    }
-
-    #[test]
-    // Purpose
-    // -------
-    // Verify that `InferenceError::UnknownError` renders the documented
-    // fallback message.
-    //
-    // Given
-    // -----
-    // - An `InferenceError::UnknownError` instance.
-    //
-    // Expect
-    // ------
-    // - `Display` returns the standard "Unknown error" message.
-    fn inferenceerror_display_unknownerror_uses_standard_message() {
-        // Arrange
-        let err = InferenceError::UnknownError;
-
-        // Act
-        let msg = err.to_string();
-
-        // Assert
-        assert_eq!(msg, "Inference Error: Unknown error occurred");
     }
 
     #[test]

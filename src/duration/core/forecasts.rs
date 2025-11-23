@@ -212,7 +212,7 @@ impl ACDForecastResult {
 ///   - `duration_lags.len() != params.alpha.len()`
 ///   - `params.psi_lags.len() != params.beta.len()`
 ///   - `forecast_result.psi_forecast` has length `< horizon`
-///   These are treated as logic errors in the caller and are not guarded
+/// - These are treated as logic errors in the caller and are not guarded
 ///   against at runtime within this function.
 ///
 /// Safety

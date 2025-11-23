@@ -438,7 +438,7 @@ impl Default for SimOpts {
 ///   - ψ-lags are produced internally (e.g., via recursive
 ///     application of the model), not taken from user input.
 /// - For `Warm`, `burn_in` is interpreted as a non-negative integer; the simulator is
-///     responsible for enforcing any minimum length requirements.
+///   responsible for enforcing any minimum length requirements.
 ///
 /// Notes
 /// -----
