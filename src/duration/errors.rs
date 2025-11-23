@@ -69,9 +69,7 @@ use crate::optimization::errors::OptError;
 use statrs::distribution::{ExpError, GammaError, WeibullError};
 
 #[cfg(feature = "python-bindings")]
-use pyo3::exceptions::PyValueError;
-#[cfg(feature = "python-bindings")]
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyValueError, PyErr};
 
 /// Crate-wide result alias for ACD operations that may produce [`ACDError`].
 pub type ACDResult<T> = Result<T, ACDError>;
@@ -396,7 +394,7 @@ impl std::fmt::Display for ACDError {
                 write!(f, "Weibull distribution shape parameter must be > 0.")
             }
             ACDError::UnknownError => {
-                write!(f, "An unknown error occurred in the distribution.")
+                write!(f, "An unknown error occurred.")
             }
 
             // ---- ParamError ----
@@ -439,7 +437,7 @@ impl std::fmt::Display for ACDError {
 #[cfg(feature = "python-bindings")]
 impl From<ACDError> for PyErr {
     fn from(err: ACDError) -> PyErr {
-        PyValueError::new_err(err.to_string())
+        PyValueError::new_err(format!("ACDError: {err:?}"))
     }
 }
 
@@ -658,7 +656,7 @@ impl std::fmt::Display for ParamError {
 #[cfg(feature = "python-bindings")]
 impl std::convert::From<ParamError> for PyErr {
     fn from(err: ParamError) -> PyErr {
-        PyValueError::new_err(err.to_string())
+        PyValueError::new_err(format!("PARAMError: {err:?}"))
     }
 }
 

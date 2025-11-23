@@ -415,6 +415,13 @@ impl ACD {
     }
 
     #[pyo3(
+        signature = (
+            durations,
+            theta0,
+            unit = None,
+            t0 = None,
+            diurnal_adjusted = None,
+        ),
         text_signature = "(self, durations, theta0, /, unit='seconds', t0=None, diurnal_adjusted=False)"
     )]
     pub fn fit<'py>(
@@ -433,6 +440,13 @@ impl ACD {
     }
 
     #[pyo3(
+        signature = (
+            durations,
+            horizon,
+            unit = None,
+            t0 = None,
+            diurnal_adjusted = None,
+        ),
         text_signature = "(self, durations, horizon, /, unit='seconds', t0=None, diurnal_adjusted=False)"
     )]
     pub fn forecast<'py>(
@@ -445,6 +459,17 @@ impl ACD {
     }
 
     #[pyo3(
+        signature = (
+            durations,
+            unit = None,
+            t0 = None,
+            diurnal_adjusted = None,
+            robust = None,
+            kernel = None,
+            bandwidth = None,
+            center = None,
+            small_sample_correction = None,
+        ),
         text_signature = "(self, durations, /, unit='seconds', t0=None, diurnal_adjusted=False, \
                           robust=False, kernel='bartlett', bandwidth=None, center=False, \
                           small_sample_correction=True)"

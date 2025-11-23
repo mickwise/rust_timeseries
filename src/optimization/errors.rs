@@ -62,6 +62,9 @@ use argmin::core::{ArgminError, Error};
 
 use crate::duration::errors::{ACDError, ParamError};
 
+#[cfg(feature = "python-bindings")]
+use pyo3::{exceptions::PyValueError, PyErr};
+
 /// Crate-wide result alias for optimizer operations.
 pub type OptResult<T> = Result<T, OptError>;
 
@@ -389,6 +392,13 @@ impl std::fmt::Display for OptError {
                 write!(f, "Unknown error")
             }
         }
+    }
+}
+
+#[cfg(feature = "python-bindings")]
+impl From<OptError> for PyErr {
+    fn from(err: OptError) -> PyErr {
+        PyValueError::new_err(format!("OPTError: {err:?}"))
     }
 }
 

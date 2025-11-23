@@ -49,30 +49,83 @@ jobs:
 
       - name: Smoke-test the Python API
         run: |
-          cd /tmp
-          python - <<'PY'
+          python - << 'PY'
           import numpy as np
-
+      
           import rust_timeseries
-          print("OK:", rust_timeseries, rust_timeseries.__file__)
-
-          # Statistical tests: Escanciano–Lobato
           from rust_timeseries.statistical_tests import EscancianoLobato
-          print("Found EscancianoLobato:", EscancianoLobato)
-
-          data = np.random.randn(50)
-          test = EscancianoLobato(data)
-          print("EL statistic:", test.statistic, "pvalue:", test.pvalue, "p_tilde:", test.p_tilde)
-
-          # Duration models: only smoke-test that the binding and constructor work.
           from rust_timeseries.duration_models import ACD
-          durations = np.ones(10, dtype=np.float64)
-
-          # Just construct; don't call fit/forecast/covariance here.
-          model = ACD(data_length=len(durations), p=1, q=1)
-          print("ACD construction OK (no fit/forecast in CI)")
-
+      
+          print("rust_timeseries imported OK")
+          print("  __version__:", getattr(rust_timeseries, "__version__", "<no __version__>"))
+          print("  __file__   :", getattr(rust_timeseries, "__file__", "<no __file__>"))
+      
+          rng = np.random.default_rng(12345)
+      
+          # ------------------------------------------------------------------
+          # 1) Statistical tests: Escanciano–Lobato portmanteau
+          # ------------------------------------------------------------------
+          x = rng.normal(size=200)
+          test = EscancianoLobato(x)
+      
+          print("EscancianoLobato:")
+          print("  statistic =", test.statistic)
+          print("  pvalue    =", test.pvalue)
+          print("  p_tilde   =", test.p_tilde)
+      
+          assert np.isfinite(test.statistic), "EL statistic is not finite"
+          assert np.isfinite(test.pvalue), "EL p-value is not finite"
+          assert 0.0 <= test.pvalue <= 1.0, "EL p-value is outside [0, 1]"
+          # p_tilde is typically an indicator {0,1}; just check it's integral & finite
+          assert np.isfinite(test.p_tilde), "EL p_tilde is not finite"
+      
+          # ------------------------------------------------------------------
+          # 2) Duration models: ACD(1, 1) end-to-end smoke
+          # ------------------------------------------------------------------
+          n = 100
+          # strictly positive synthetic durations
+          durations = 1.0 + np.abs(rng.normal(loc=1.0, scale=0.2, size=n)).astype(np.float64)
+      
+          # theta dimension for ACD(1,1): [omega, alpha_1, beta_1]
+          theta0 = np.zeros(3, dtype=np.float64)
+      
+          print("About to construct ACD model...")
+          model = ACD(durations, p=1, q=1)
+          print("  model:", model)
+      
+          print("About to fit ACD model...")
+          model.fit(durations, theta0)
+          print("  fit OK")
+      
+          print("About to forecast...")
+          psi_hat = model.forecast(durations, horizon=5)
+          print("  psi_hat:", psi_hat)
+          assert np.isfinite(psi_hat), "forecast is not finite"
+          assert psi_hat > 0.0, "forecast must be strictly positive"
+      
+          print("About to compute covariance matrices...")
+          cov_classical = model.covariance_matrix(durations, robust=False)
+          cov_classical = np.asarray(cov_classical, dtype=np.float64)
+      
+          cov_hac = model.covariance_matrix(durations, robust=True)
+          cov_hac = np.asarray(cov_hac, dtype=np.float64)
+      
+          print("  cov_classical shape:", cov_classical.shape)
+          print("  cov_hac       shape:", cov_hac.shape)
+      
+          expected_shape = (theta0.size, theta0.size)
+          assert cov_classical.shape == expected_shape, "classical cov has wrong shape"
+          assert cov_hac.shape == expected_shape, "HAC cov has wrong shape"
+      
+          assert np.all(np.isfinite(cov_classical)), "non-finite entries in classical cov"
+          assert np.all(np.isfinite(cov_hac)), "non-finite entries in HAC cov"
+      
+          # diagonal variances should be non-negative
+          assert np.all(np.diag(cov_classical) >= 0.0), "negative variance in classical cov"
+          assert np.all(np.diag(cov_hac) >= 0.0), "negative variance in HAC cov"
+      
           print("Python API smoke test: OK")
           PY
+      
 
 

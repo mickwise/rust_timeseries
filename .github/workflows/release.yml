@@ -45,7 +45,69 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip wheel setuptools maturin
-          maturin build --release --sdist         # one line now
+          # Explicit output directory so we don't depend on maturin's defaults
+          maturin build --release --sdist --out dist
+
+      - name: Smoke-test built wheel
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+
+          python - << 'PY'
+          import numpy as np
+
+          import rust_timeseries
+          from rust_timeseries.statistical_tests import EscancianoLobato
+          from rust_timeseries.duration_models import ACD
+
+          print("rust_timeseries imported OK")
+          print("  __version__:", getattr(rust_timeseries, "__version__", "<no __version__>"))
+          print("  __file__   :", getattr(rust_timeseries, "__file__", "<no __file__>"))
+
+          rng = np.random.default_rng(12345)
+
+          # 1) Escanciano–Lobato
+          x = rng.normal(size=200)
+          test = EscancianoLobato(x)
+          assert np.isfinite(test.statistic), "EL statistic is not finite"
+          assert np.isfinite(test.pvalue), "EL p-value is not finite"
+          assert 0.0 <= test.pvalue <= 1.0, "EL p-value out of [0, 1]"
+          assert np.isfinite(test.p_tilde), "EL p_tilde is not finite"
+
+          # 2) ACD(1,1) smoke
+          n = 100
+          durations = 1.0 + np.abs(
+              rng.normal(loc=1.0, scale=0.2, size=n)
+          ).astype(np.float64)
+          theta0 = np.zeros(3, dtype=np.float64)
+
+          model = ACD(data_length=n, p=1, q=1)
+          model.fit(durations, theta0)
+
+          psi_hat = model.forecast(durations, horizon=5)
+          assert np.isfinite(psi_hat), "forecast is not finite"
+          assert psi_hat > 0.0, "forecast must be positive"
+
+          cov_classical = np.asarray(
+              model.covariance_matrix(durations, robust=False),
+              dtype=np.float64,
+          )
+          cov_hac = np.asarray(
+              model.covariance_matrix(durations, robust=True),
+              dtype=np.float64,
+          )
+
+          expected_shape = (theta0.size, theta0.size)
+          assert cov_classical.shape == expected_shape, "classical cov wrong shape"
+          assert cov_hac.shape == expected_shape, "HAC cov wrong shape"
+          assert np.all(np.isfinite(cov_classical)), "non-finite in classical cov"
+          assert np.all(np.isfinite(cov_hac)), "non-finite in HAC cov"
+          assert np.all(np.diag(cov_classical) >= 0.0), "negative var in classical cov"
+          assert np.all(np.diag(cov_hac) >= 0.0), "negative var in HAC cov"
+
+          print("Release smoke test passed.")
+          PY
 
       # Publish to PyPI
       - name: Publish to PyPI
@@ -56,5 +118,4 @@ jobs:
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
           python -m pip install --upgrade twine
-          twine upload --skip-existing target/wheels/*
-
+          twine upload --skip-existing dist/*

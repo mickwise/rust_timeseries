@@ -2,18 +2,24 @@
 use ndarray::Array1;
 
 #[cfg(feature = "python-bindings")]
+use std::str::FromStr;
+
+#[cfg(feature = "python-bindings")]
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyAny};
 
 #[cfg(feature = "python-bindings")]
 use crate::{
     duration::{
         core::{
-            data::ACDData, guards::PsiGuards, init::Init, options::ACDOptions, shape::ACDShape,
+            data::{ACDData, ACDMeta}, guards::PsiGuards, init::Init, options::ACDOptions, shape::ACDShape,
+            units::ACDUnit,
         },
         models::acd::ACDModel,
     },
     inference::{hac::HACOptions, kernel::KernelType},
-    optimization::loglik_optimizer::traits::{LineSearcher, MLEOptions, Tolerances},
+    optimization::{
+        loglik_optimizer::traits::{LineSearcher, MLEOptions, Tolerances},
+    },
 };
 
 #[cfg(feature = "python-bindings")]
@@ -59,8 +65,8 @@ pub fn build_acd_model<'py>(
     tol_grad: Option<f64>, tol_cost: Option<f64>, max_iter: Option<usize>,
     line_searcher: Option<&str>, lbfgs_mem: Option<usize>, psi_guards: Option<(f64, f64)>,
 ) -> PyResult<ACDModel> {
-    let p_val = p.unwrap_or(1);
-    let q_val = q.unwrap_or(1);
+    let p_val = p.unwrap_or(0);
+    let q_val = q.unwrap_or(0);
 
     // Validate shape against in-sample length.
     let shape = ACDShape::new(p_val, q_val, data_length)?;
@@ -145,22 +151,17 @@ fn extract_mle_opts(
     tol_grad: Option<f64>, tol_cost: Option<f64>, max_iter: Option<usize>,
     line_searcher: Option<&str>, lbfgs_mem: Option<usize>,
 ) -> PyResult<MLEOptions> {
-    use std::str::FromStr;
-
-    use crate::duration::errors::ACDError;
-
-    // Tolerances::new -> OptResult<Tolerances> -> ACDError -> PyErr
-    let tols = Tolerances::new(tol_grad, tol_cost, max_iter).map_err(ACDError::from)?;
-
-    // LineSearcher::from_str -> OptResult<LineSearcher> -> ACDError -> PyErr
+    if tol_grad == None && tol_cost == None && max_iter == None
+        && line_searcher == None && lbfgs_mem == None
+    {
+        return Ok(MLEOptions::default());
+    }
+    let tols = Tolerances::new(tol_grad, tol_cost, max_iter)?;
     let ls = match line_searcher {
-        Some(name) => LineSearcher::from_str(name).map_err(ACDError::from)?,
+        Some(name) => LineSearcher::from_str(name)?,
         None => LineSearcher::MoreThuente,
     };
-
-    // MLEOptions::new -> OptResult<MLEOptions> -> ACDError -> PyErr
-    let opts = MLEOptions::new(tols, ls, lbfgs_mem).map_err(ACDError::from)?;
-
+    let opts = MLEOptions::new(tols, ls, lbfgs_mem)?;
     Ok(opts)
 }
 
@@ -169,8 +170,6 @@ pub fn extract_acd_data<'py>(
     py: Python<'py>, durations: &Bound<'py, PyAny>, unit: Option<&str>, t0: Option<usize>,
     diurnal_adjusted: Option<bool>,
 ) -> PyResult<ACDData> {
-    use crate::duration::core::{data::ACDMeta, units::ACDUnit};
-
     let dur_arr = extract_f64_array(py, durations)?;
     let dur_slice = dur_arr.as_slice().map_err(|_| {
         PyValueError::new_err("durations must be a 1-D contiguous float64 array or sequence")
