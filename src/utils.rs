@@ -194,7 +194,6 @@ pub fn extract_acd_data<'py>(
     match model {
         Ok(data) => Ok(data),
         Err(e) => Err(e.into()),
-        
     }
 }
 

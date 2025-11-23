@@ -72,10 +72,7 @@ use pyo3::{exceptions::PyValueError, prelude::*, types::PyAny};
 #[cfg(feature = "python-bindings")]
 use crate::{
     duration::{
-        core::{
-            innovations::ACDInnovation,
-            params::ACDParams,
-        },
+        core::{innovations::ACDInnovation, params::ACDParams},
         errors::ACDError,
         models::acd::ACDModel,
     },

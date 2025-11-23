@@ -24,5 +24,6 @@ classifiers = [
 urls = { Homepage = "https://github.com/mickwise/rust_timeseries", Issues = "https://github.com/mickwise/rust_timeseries/issues" }
 
 [tool.maturin]
+features = ["python"]
 bindings = "pyo3"
 module-name = "rust_timeseries._rust_timeseries"

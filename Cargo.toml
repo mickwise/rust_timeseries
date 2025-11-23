@@ -5,7 +5,7 @@ edition = "2024"
 
 [lib]
 name = "rust_timeseries"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib", "cdylib"]
 doctest = false
 
 [dependencies]
@@ -18,17 +18,15 @@ arima = "0.3.0"
 finitediff = { version = "0.1.4", features = ["ndarray"] }
 nalgebra = "0.34.0"
 ndarray = "0.15"
-
-# Python-related deps are OPTIONAL now
-numpy = { version = "0.25.0", optional = true }
-pyo3  = { version = "0.25.1", optional = true, features = ["extension-module"] }
-
-rand   = "0.8.0"
+rand = "0.8.0"
 statrs = { version = "0.18.0", features = ["rand"] }
 
+# ---- Python-only deps (OPTIONAL) ----
+numpy = { version = "0.25.0", optional = true }
+pyo3  = { version = "0.25.1", features = ["extension-module"], optional = true }
+
 [features]
-default = ["python-bindings"]
+default = []
+python-bindings = ["dep:numpy", "dep:pyo3"]
 obs_slog = ["dep:argmin-observer-slog"]
 
-# Turn Python bindings on/off cleanly
-python-bindings = ["dep:pyo3", "dep:numpy"]
