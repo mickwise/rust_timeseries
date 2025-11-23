@@ -311,6 +311,7 @@ impl ACD {
         Ok(ACD { inner })
     }
 
+    #[staticmethod]
     #[pyo3(
         signature = (
             data_length,
@@ -361,6 +362,7 @@ impl ACD {
         Ok(ACD { inner })
     }
 
+    #[staticmethod]
     #[pyo3(
         signature = (
             data_length,
