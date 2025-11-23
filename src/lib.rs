@@ -379,13 +379,13 @@ impl ACD {
             lbfgs_mem = None,
             psi_guards = None,
         ),
-        text_signature = "(data_length, p_shape, d_shape/, p=None, q=None, init=None, init_fixed=None, \
+        text_signature = "(data_length, p_shape, d_shape, /, p=None, q=None, init=None, init_fixed=None, \
                           init_psi_lags=None, init_durations_lags=None, tol_grad=None, \
                           tol_cost=None, max_iter=None, line_searcher=None, \
                           lbfgs_mem=None, psi_guards=None)"
     )]
     pub fn gacd<'py>(
-        py: Python<'py>, p_shape: f64, d_shape: f64, data_length: usize, p: Option<usize>,
+        py: Python<'py>, data_length: usize, p_shape: f64, d_shape: f64, p: Option<usize>,
         q: Option<usize>, init: Option<&str>, init_fixed: Option<f64>,
         init_psi_lags: Option<&Bound<'py, PyAny>>, init_durations_lags: Option<&Bound<'py, PyAny>>,
         tol_grad: Option<f64>, tol_cost: Option<f64>, max_iter: Option<usize>,
