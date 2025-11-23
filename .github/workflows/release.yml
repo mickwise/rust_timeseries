@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -33,29 +33,28 @@ jobs:
           toolchain: stable
 
       - name: Cache cargo & pip
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cache/pip
-          # Avoid hashFiles() to prevent template-evaluation failures
           key: ${{ runner.os }}-cargo-${{ matrix.python-version }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
 
       - name: Build wheels & sdist
         shell: bash
         run: |
           python -m pip install --upgrade pip wheel setuptools maturin
-          # Explicit output directory so we don't depend on maturin's defaults
           maturin build --release --sdist --out dist
 
       - name: Smoke-test built wheel
         shell: bash
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip numpy
           python -m pip install dist/*.whl
+
+          mkdir -p /tmp/rust_ts_smoke
+          cd /tmp/rust_ts_smoke
 
           python - << 'PY'
           import numpy as np
@@ -71,15 +70,15 @@ jobs:
           rng = np.random.default_rng(12345)
 
           # 1) Escanciano–Lobato
-          x = rng.normal(size=200)
+          x = rng.normal(size=200, loc=0.0, scale=1.0).astype(np.float64)
           test = EscancianoLobato(x)
           assert np.isfinite(test.statistic), "EL statistic is not finite"
           assert np.isfinite(test.pvalue), "EL p-value is not finite"
           assert 0.0 <= test.pvalue <= 1.0, "EL p-value out of [0, 1]"
           assert np.isfinite(test.p_tilde), "EL p_tilde is not finite"
 
-          # 2) ACD(1,1) smoke
-          n = 100
+          # 2) ACD(1,1) smoke test
+          n = 200
           durations = 1.0 + np.abs(
               rng.normal(loc=1.0, scale=0.2, size=n)
           ).astype(np.float64)

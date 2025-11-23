@@ -1,9 +1,9 @@
-name: CI
+name: lint-and-build
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
 
 jobs:
   lint-and-build:
@@ -21,111 +21,95 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
+          components: rustfmt, clippy
 
       - name: Check formatting
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run Rust tests
-        run: cargo test -- --nocapture
+        run: cargo test --all-targets --all-features
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Build wheel & sdist
+        shell: bash
         run: |
-          python -m pip install --upgrade pip maturin
-          maturin build --release --sdist
+          python -m pip install --upgrade pip wheel setuptools maturin
+          maturin build --release --sdist --out dist
 
       - name: Install built wheel
-        run: python -m pip install target/wheels/*.whl
+        shell: bash
+        run: |
+          python -m pip install dist/*.whl
 
       - name: Install test dependencies
-        run: python -m pip install numpy
+        shell: bash
+        run: |
+          python -m pip install numpy
 
       - name: Smoke-test the Python API
+        shell: bash
         run: |
+          mkdir -p /tmp/rust_ts_smoke
+          cd /tmp/rust_ts_smoke
+
           python - << 'PY'
           import numpy as np
-      
+
           import rust_timeseries
           from rust_timeseries.statistical_tests import EscancianoLobato
           from rust_timeseries.duration_models import ACD
-      
+
           print("rust_timeseries imported OK")
           print("  __version__:", getattr(rust_timeseries, "__version__", "<no __version__>"))
           print("  __file__   :", getattr(rust_timeseries, "__file__", "<no __file__>"))
-      
+
           rng = np.random.default_rng(12345)
-      
-          # ------------------------------------------------------------------
-          # 1) Statistical tests: Escanciano–Lobato portmanteau
-          # ------------------------------------------------------------------
-          x = rng.normal(size=200)
+
+          # 1) Escanciano–Lobato
+          x = rng.normal(size=200, loc=0.0, scale=1.0).astype(np.float64)
           test = EscancianoLobato(x)
-      
-          print("EscancianoLobato:")
-          print("  statistic =", test.statistic)
-          print("  pvalue    =", test.pvalue)
-          print("  p_tilde   =", test.p_tilde)
-      
           assert np.isfinite(test.statistic), "EL statistic is not finite"
           assert np.isfinite(test.pvalue), "EL p-value is not finite"
-          assert 0.0 <= test.pvalue <= 1.0, "EL p-value is outside [0, 1]"
-          # p_tilde is typically an indicator {0,1}; just check it's integral & finite
+          assert 0.0 <= test.pvalue <= 1.0, "EL p-value out of [0, 1]"
           assert np.isfinite(test.p_tilde), "EL p_tilde is not finite"
-      
-          # ------------------------------------------------------------------
-          # 2) Duration models: ACD(1, 1) end-to-end smoke
-          # ------------------------------------------------------------------
-          n = 100
-          # strictly positive synthetic durations
-          durations = 1.0 + np.abs(rng.normal(loc=1.0, scale=0.2, size=n)).astype(np.float64)
-      
-          # theta dimension for ACD(1,1): [omega, alpha_1, beta_1]
+
+          # 2) ACD(1,1) smoke test
+          n = 200
+          durations = 1.0 + np.abs(
+              rng.normal(loc=1.0, scale=0.2, size=n)
+          ).astype(np.float64)
           theta0 = np.zeros(3, dtype=np.float64)
-      
-          print("About to construct ACD model...")
-          model = ACD(durations, p=1, q=1)
-          print("  model:", model)
-      
-          print("About to fit ACD model...")
+
+          model = ACD(data_length=n, p=1, q=1)
           model.fit(durations, theta0)
-          print("  fit OK")
-      
-          print("About to forecast...")
+
           psi_hat = model.forecast(durations, horizon=5)
-          print("  psi_hat:", psi_hat)
           assert np.isfinite(psi_hat), "forecast is not finite"
-          assert psi_hat > 0.0, "forecast must be strictly positive"
-      
-          print("About to compute covariance matrices...")
-          cov_classical = model.covariance_matrix(durations, robust=False)
-          cov_classical = np.asarray(cov_classical, dtype=np.float64)
-      
-          cov_hac = model.covariance_matrix(durations, robust=True)
-          cov_hac = np.asarray(cov_hac, dtype=np.float64)
-      
-          print("  cov_classical shape:", cov_classical.shape)
-          print("  cov_hac       shape:", cov_hac.shape)
-      
+          assert psi_hat > 0.0, "forecast must be positive"
+
+          cov_classical = np.asarray(
+              model.covariance_matrix(durations, robust=False),
+              dtype=np.float64,
+          )
+          cov_hac = np.asarray(
+              model.covariance_matrix(durations, robust=True),
+              dtype=np.float64,
+          )
+
           expected_shape = (theta0.size, theta0.size)
-          assert cov_classical.shape == expected_shape, "classical cov has wrong shape"
-          assert cov_hac.shape == expected_shape, "HAC cov has wrong shape"
-      
-          assert np.all(np.isfinite(cov_classical)), "non-finite entries in classical cov"
-          assert np.all(np.isfinite(cov_hac)), "non-finite entries in HAC cov"
-      
-          # diagonal variances should be non-negative
-          assert np.all(np.diag(cov_classical) >= 0.0), "negative variance in classical cov"
-          assert np.all(np.diag(cov_hac) >= 0.0), "negative variance in HAC cov"
-      
-          print("Python API smoke test: OK")
+          assert cov_classical.shape == expected_shape, "classical cov wrong shape"
+          assert cov_hac.shape == expected_shape, "HAC cov wrong shape"
+          assert np.all(np.isfinite(cov_classical)), "non-finite in classical cov"
+          assert np.all(np.isfinite(cov_hac)), "non-finite in HAC cov"
+          assert np.all(np.diag(cov_classical) >= 0.0), "negative var in classical cov"
+          assert np.all(np.diag(cov_hac) >= 0.0), "negative var in HAC cov"
+
+          print("CI smoke test passed.")
           PY
-      
-
-
