@@ -314,6 +314,7 @@ impl ACD {
     #[pyo3(
         signature = (
             data_length,
+            k,
             p = None,
             q = None,
             init = None,
@@ -327,13 +328,13 @@ impl ACD {
             lbfgs_mem = None,
             psi_guards = None,
         ),
-        text_signature = "(data_length, /, p=None, q=None, init=None, init_fixed=None, \
+        text_signature = "(data_length, k, /, p=None, q=None, init=None, init_fixed=None, \
                           init_psi_lags=None, init_durations_lags=None, tol_grad=None, \
                           tol_cost=None, max_iter=None, line_searcher=None, \
                           lbfgs_mem=None, psi_guards=None)"
     )]
     pub fn wacd<'py>(
-        py: Python<'py>, data_length: usize, p: Option<usize>, q: Option<usize>, k: f64,
+        py: Python<'py>, data_length: usize, k: f64, p: Option<usize>, q: Option<usize>,
         init: Option<&str>, init_fixed: Option<f64>, init_psi_lags: Option<&Bound<'py, PyAny>>,
         init_durations_lags: Option<&Bound<'py, PyAny>>, tol_grad: Option<f64>,
         tol_cost: Option<f64>, max_iter: Option<usize>, line_searcher: Option<&str>,
@@ -363,6 +364,8 @@ impl ACD {
     #[pyo3(
         signature = (
             data_length,
+            p_shape,
+            d_shape,
             p = None,
             q = None,
             init = None,
@@ -376,14 +379,14 @@ impl ACD {
             lbfgs_mem = None,
             psi_guards = None,
         ),
-        text_signature = "(data_length, /, p=None, q=None, init=None, init_fixed=None, \
+        text_signature = "(data_length, p_shape, d_shape/, p=None, q=None, init=None, init_fixed=None, \
                           init_psi_lags=None, init_durations_lags=None, tol_grad=None, \
                           tol_cost=None, max_iter=None, line_searcher=None, \
                           lbfgs_mem=None, psi_guards=None)"
     )]
     pub fn gacd<'py>(
-        py: Python<'py>, data_length: usize, p: Option<usize>, q: Option<usize>, p_shape: f64,
-        d_shape: f64, init: Option<&str>, init_fixed: Option<f64>,
+        py: Python<'py>, p_shape: f64, d_shape: f64, data_length: usize, p: Option<usize>,
+        q: Option<usize>, init: Option<&str>, init_fixed: Option<f64>,
         init_psi_lags: Option<&Bound<'py, PyAny>>, init_durations_lags: Option<&Bound<'py, PyAny>>,
         tol_grad: Option<f64>, tol_cost: Option<f64>, max_iter: Option<usize>,
         line_searcher: Option<&str>, lbfgs_mem: Option<usize>, psi_guards: Option<(f64, f64)>,
