@@ -1,427 +1,327 @@
 # rust_timeseries — Python bindings for duration models and tests
 
-`rust_timeseries` is a **Python-first** package for
+`rust_timeseries` is a **Python-first** library that wraps high-performance Rust code for:
 
-- modelling **event-time durations** with ACD-type models,
-- calling a Rust-implemented **maximum-likelihood optimizer**,
+- modelling event-time durations with ACD-type models,
+- calling a Rust-implemented maximum-likelihood optimizer,
 - extracting fitted parameters and optimizer diagnostics, and
-- running the **Escanciano–Lobato** heteroskedasticity proxy test.
+- running the Escanciano–Lobato (2009) portmanteau test, which is robust to conditional heteroskedasticity.
 
-All heavy computation runs in Rust (see `lib.rs`, `duration`, and `statistical_tests`),
-but the public surface is a small, typed Python API defined by the compiled
-`_rust_timeseries` extension and the stub files
+All heavy computation lives in Rust; the public surface is a small, typed Python API exposed via the compiled `_rust_timeseries` extension and the stub files:
 
 - `duration_models.pyi`
-- `statistical_tests.pyi`.
+- `statistical_tests.pyi`
 
-This document describes only what is actually exposed through those bindings.
+This README documents only what is actually exposed through those bindings.
 
 ---
 
 ## 1. Installation
 
-From source, using `maturin` (development workflow):
+### 1.1 From PyPI (recommended)
 
-    maturin develop --release
+Version `1.0.0` is available on PyPI:
 
-Once the wheel is installed into your environment you can import:
+```bash
+pip install rust_timeseries
+```
 
-    import rust_timeseries as rts
+The project currently ships wheels for **Python 3.11–3.13** on common Linux, macOS, and Windows targets.  
+For unsupported platforms/versions, you can build from source (see below).
 
-and typically:
+### 1.2 From source (development / contributing)
 
-    from rust_timeseries import duration_models, statistical_tests
+You’ll need a recent Rust **stable** toolchain and Python ≥ 3.11.
 
-A future PyPI release will allow installation via
+Clone the repo and create a virtual environment:
 
-    pip install rust_timeseries
+```bash
+git clone https://github.com/mickwise/rust_timeseries.git
+cd rust_timeseries
 
-without changing the Python API.
+python -m venv .venv
+source .venv/bin/activate      # on Windows: .venv\Scripts\activate
+pip install -U pip maturin
+maturin develop --release
+```
+
+This builds the extension in place and installs it into your current environment. The Python usage is identical to the PyPI installation.
 
 ---
 
 ## 2. Python modules
 
-The Python-visible layout mirrors the bindings defined in `lib.rs`:
+The compiled extension `_rust_timeseries.*` is **not** imported directly; instead, use the public modules:
 
-    rust_timeseries/
-        duration_models.py      # ACD models and optimization results
-        statistical_tests.py    # Escanciano–Lobato test
-        _rust_timeseries.*      # compiled extension (internal)
+```text
+rust_timeseries/
+    duration_models.py      # ACD models and related utilities
+    statistical_tests.py    # Escanciano–Lobato test
+    _rust_timeseries.*      # compiled extension (internal)
+```
 
-Rust-only modules such as `duration`, `inference`, `optimization`, and `utils`
-are implementation details and are **not** part of the public Python API.
+Use:
 
-Users should import only from
+```python
+import rust_timeseries
+from rust_timeseries import duration_models, statistical_tests
+# or
+from rust_timeseries.duration_models import ACD
+from rust_timeseries.statistical_tests import EscancianoLobato
+```
 
-- `rust_timeseries.duration_models`
-- `rust_timeseries.statistical_tests`.
+Do **not** import from internal Rust modules (`duration`, `optimization`, etc.). Always go through the public Python modules above.
 
 ---
 
 ## 3. Duration models (`rust_timeseries.duration_models`)
 
-The `duration_models` module is the main entry point for ACD(p, q)-type duration
-processes. The public classes implemented in `lib.rs` and described in
-`duration_models.pyi` are:
+The `duration_models` module exposes ACD-type processes via the `ACD` class.
 
-- `ACD`               – duration model used from Python,
-- `ACDOptimOutcome`   – optimization diagnostics,
-- `ACDFittedParams`   – fitted model-space parameters.
+> **Note:** Only the main surface API is documented here.  
+> For full signatures, see the Python type stubs (`duration_models.pyi`) and the docstrings.
 
-### 3.1 Constructing an ACD model
+### 3.1 Minimal example
 
-`ACD` instances are configured once and reused across fits. The constructor
-exposes the same arguments that the PyO3 wrapper forwards into Rust:
+```python
+import numpy as np
+from rust_timeseries.duration_models import ACD
 
-    from rust_timeseries.duration_models import ACD
+# synthetic durations (strictly positive floats)
+durations = 1.0 + np.abs(np.random.randn(200))
 
-    acd = ACD(
-        data_length=len(durations),  # in-sample length
-        p=1,                         # AR order of ψ_t (optional)
-        q=1,                         # MA order of durations (optional)
-        init=None,
-        init_fixed=None,
-        init_psi_lags=None,
-        init_durations_lags=None,
-        tol_grad=None,
-        tol_cost=None,
-        max_iter=None,
-        line_searcher=None,
-        lbfgs_mem=None,
-        psi_guards=None,
-    )
+# unconstrained parameter guess (length 1 + p + q)
+theta0 = np.zeros(3, dtype=np.float64)  # (ω, α₁, β₁)
 
-Key arguments (see `duration_models.pyi` for full details):
+# configure ACD(1,1); see docstring for all options
+model = ACD(data_length=len(durations), p=1, q=1)
 
-- `data_length: int`  
-  Length of the in-sample duration series. This determines internal buffer
-  sizes and is checked whenever you call `fit`, `forecast`, or
-  `standard_errors`.
-- `p: int | None`, `q: int | None`  
-  Model orders. At least one of them must be positive.
-- `init`, `init_fixed`, `init_psi_lags`, `init_durations_lags`  
-  Initialization policy and associated values, forwarded unchanged to
-  Rust-side initialization logic.
-- `tol_grad`, `tol_cost`, `max_iter`, `line_searcher`, `lbfgs_mem`  
-  Optimizer tolerances and configuration.
-- `psi_guards: tuple[float, float] | None`  
-  Optional lower/upper bounds on the conditional mean process ψ_t, mapped
-  into Rust as `PsiGuards`.
+# fit model in unconstrained parameter space
+model.fit(durations=durations, theta0=theta0)
 
-The default constructor uses an **exponential** innovation distribution.
-Two alternative constructors are available:
+# short-horizon forecast of conditional duration
+psi_hat = model.forecast(durations=durations, horizon=5)
+print("ψ(5) =", psi_hat)
+
+# classical vs. HAC-robust covariance matrices for θ
+cov_classical = model.covariance_matrix(durations, robust=False)
+cov_hac       = model.covariance_matrix(durations, robust=True)
+
+print("classical cov shape:", np.asarray(cov_classical).shape)
+print("HAC cov shape      :", np.asarray(cov_hac).shape)
+```
+
+Key methods (high level):
+
+- `ACD(data_length: int, p: int, q: int, **options)`  
+  Construct an ACD(p, q) model for a given sample length. Extra options (e.g., stationarity margins, backcasting choices) are documented in the class docstring.
+
+- `fit(durations: np.ndarray, theta0: np.ndarray, ...) -> None`  
+  Estimate parameters in an unconstrained space (internally mapped to a stationary region).
+
+- `forecast(durations: np.ndarray, horizon: int, ...) -> float`  
+  Run an out-of-sample forecast and return the final ψ at the requested horizon.
+
+- `covariance_matrix(durations: np.ndarray, robust: bool = False, ...) -> list[list[float]]`  
+  Return model-based (`robust=False`) or HAC-robust (`robust=True`) covariance matrices for the unconstrained parameter vector.
+
+- `standard_errors(...) -> list[float]`  
+  Convenience wrapper that returns just the standard errors (diagonal of the chosen covariance matrix).
+
+- `results -> ACDOptimOutcome`  
+  Optimizer diagnostics (status, iterations, gradient norm, evaluation counts, etc.).
+
+- `fitted_params -> ACDFittedParams`  
+  Fitted model-space parameters (ω, slack, α, β, ψ-lags) that satisfy the stationarity and positivity constraints enforced in Rust.
+
+### 3.2 Constructors and variants
+
+The main constructor:
+
+```python
+ACD(
+    data_length: int,
+    p: int,
+    q: int,
+    *,
+    init=None,
+    init_fixed=None,
+    init_psi_lags=None,
+    init_durations_lags=None,
+    tol_grad=None,
+    tol_cost=None,
+    max_iter=None,
+    line_searcher=None,
+    lbfgs_mem=None,
+    psi_guards=None,
+)
+```
+
+An exponential innovation distribution is used by default. Two alternative constructors are available:
 
 - `ACD.wacd(...)` – Weibull-innovation ACD(p, q) with shape parameter `k`.
-- `ACD.gacd(...)` – generalized-gamma-innovation ACD(p, q) with shape
-  parameters `p_shape` and `d_shape`.
+- `ACD.gacd(...)` – generalized-gamma-innovation ACD(p, q) with shape parameters `p_shape` and `d_shape`.
 
-Both `wacd` and `gacd` accept the same configuration arguments as `ACD`
-(including `data_length`, `p`, `q`, and optimizer settings), plus their
-respective shape parameters.
+Both accept the same core configuration arguments as `ACD` (`data_length`, `p`, `q`, optimizer settings), plus their respective shape parameters.
 
----
+### 3.3 Standard errors (`ACD.covariance_matrix`)
 
-### 3.2 Fitting a model (`ACD.fit`)
+`covariance_matrix` computes parameter covariance matrix for a given duration series, optionally with HAC corrections:
 
-Model fitting is performed by calling `fit` on an `ACD` instance. The method
-is backed by the Rust function `ACDModel::fit` and stores results on the
-Python object; it does **not** return the fitted parameters directly.
+```python
+se = model.covariance_matrix(
+    durations=durations,
+    unit="seconds",
+    t0=None,
+    diurnal_adjusted=False,
+    robust=True,
+    kernel="bartlett",
+    bandwidth=None,
+    center=False,
+    small_sample_correction=True,
+)
+```
 
-Minimal example:
+- When `robust=False`, covariance matrix is based on the model-based information matrix.
+- When `robust=True`, a HAC estimator is used (kernel and bandwidth options are forwarded to the Rust implementation).
 
-    import numpy as np
-    from rust_timeseries.duration_models import ACD
+### 3.4 Optimization diagnostics (`ACDOptimOutcome`)
 
-    durations = np.asarray(durations, dtype=float)
+The `results` property returns an `ACDOptimOutcome` object, wrapping the Rust `OptimOutcome` type.
 
-    acd = ACD(data_length=len(durations), p=1, q=1)
+Attributes:
 
-    # Initial parameter guess in the unconstrained parameterization.
-    theta0 = np.asarray(theta0, dtype=float)
+- `theta_hat: list[float]` – unconstrained parameter vector at the solution.
+- `value: float` – objective value at the solution.
+- `converged: bool` – whether the optimizer terminated successfully.
+- `status: str` – human-readable termination reason.
+- `iterations: int` – number of iterations taken.
+- `grad_norm: float | None` – norm of the gradient at the solution, when available.
+- `fn_evals: list[tuple[str, int]]` – evaluation counters keyed by function name.
 
-    acd.fit(
-        durations=durations,
-        theta0=theta0,
-        unit="seconds",        # or other supported unit strings
-        t0=None,               # optional index offset
-        diurnal_adjusted=False # whether durations are already adjusted
-    )
+Typical usage:
 
-Signature (from the bindings):
+```python
+outcome = model.results
+print("Converged:", outcome.converged, "-", outcome.status)
+print("Objective value:", outcome.value)
+print("Iterations:", outcome.iterations)
+print("Gradient norm:", outcome.grad_norm)
+print("Function evals:", outcome.fn_evals)
+```
 
-    def fit(
-        self,
-        durations,
-        theta0,
-        unit: str | None = "seconds",
-        t0: int | None = None,
-        diurnal_adjusted: bool | None = False,
-    ) -> None: ...
+### 3.5 Fitted parameters (`ACDFittedParams`)
 
-On success, the fitted model state is cached inside the Rust `ACDModel`.
-You can then access:
+The `fitted_params` property returns an `ACDFittedParams` instance that mirrors the Rust `ACDParams` struct:
 
-- `acd.results`        – an `ACDOptimOutcome` instance with optimizer diagnostics,
-- `acd.fitted_params`  – an `ACDFittedParams` instance with model parameters.
-
-Both are defined as `@property`-style getters in `lib.rs`.
-
-If you call `results` or `fitted_params` before any successful `fit`, the
-bindings raise a Python exception originating from the Rust
-`ACDError::ModelNotFitted` variant.
-
----
-
-### 3.3 Forecasting (`ACD.forecast` and `ACD.forecast_result`)
-
-Forecasts are produced via `ACD.forecast`, which delegates to the Rust
-`ACDModel::forecast` and stores the forecast path internally:
-
-    horizon = 20
-
-    psi_h = acd.forecast(
-        durations=durations,
-        horizon=horizon,
-        unit="seconds",
-        t0=None,
-        diurnal_adjusted=False,
-    )
-
-Signature:
-
-    def forecast(
-        self,
-        durations,
-        horizon: int,
-        unit: str | None = "seconds",
-        t0: int | None = None,
-        diurnal_adjusted: bool | None = False,
-    ) -> float: ...
-
-The return value is the final forecasted ψ at the requested horizon, while the
-full path is cached and exposed through
-
-- `acd.forecast_result` – a 1-D list of `float` corresponding to the most
-  recent forecast call.
-
-If `forecast` has not yet been called, `forecast_result` returns an empty list.
-
----
-
-### 3.4 Standard errors (`ACD.standard_errors`)
-
-The `standard_errors` method computes model parameter standard errors for a
-given duration series, optionally using **HAC** corrections. It forwards
-options directly into the Rust-side HAC implementation via `extract_hac_options`
-and `ACDModel::standard_errors`.
+- `omega: float` – baseline level parameter.
+- `slack: float` – positive slack term used to enforce strict stationarity.
+- `alpha: list[float]` – ARCH-type coefficients (size `p`).
+- `beta: list[float]` – GARCH-type coefficients (size `q`).
+- `psi_lags: list[float]` – initialization lags for ψₜ.
 
 Example:
 
-    se = acd.standard_errors(
-        durations=durations,
-        unit="seconds",
-        t0=None,
-        diurnal_adjusted=False,
-        robust=True,
-        kernel="bartlett",
-        bandwidth=None,
-        center=False,
-        small_sample_correction=True,
-    )
+```python
+params = model.fitted_params
+print("omega:", params.omega)
+print("slack:", params.slack)
+print("alpha:", params.alpha)
+print("beta:", params.beta)
+print("psi_lags:", params.psi_lags)
+```
 
-Signature:
-
-    def standard_errors(
-        self,
-        durations,
-        unit: str | None = "seconds",
-        t0: int | None = None,
-        diurnal_adjusted: bool | None = False,
-        robust: bool | None = False,
-        kernel: str | None = "bartlett",
-        bandwidth: int | None = None,
-        center: bool | None = False,
-        small_sample_correction: bool | None = True,
-    ) -> list[float]: ...
-
-Return value:
-
-- A Python `list[float]` with standard errors corresponding to the fitted
-  parameter vector. When `robust=False`, these are based on the model-based
-  information matrix; when `robust=True`, a HAC estimator is used.
-
----
-
-### 3.5 Optimization diagnostics (`ACDOptimOutcome`)
-
-The `ACD.results` property returns an `ACDOptimOutcome` object, which is a
-thin wrapper around the Rust `OptimOutcome` type. The PyO3 bindings defined
-in `lib.rs` expose the following attributes:
-
-- `theta_hat: list[float]`  
-  Final parameter vector in the unconstrained parameterization.
-- `value: float`  
-  Objective value at the solution (e.g. maximized log-likelihood or its
-  negation, depending on configuration).
-- `converged: bool`  
-  Whether the optimizer terminated with a successful status.
-- `status: str`  
-  Human-readable termination reason.
-- `iterations: int`  
-  Number of iterations taken.
-- `grad_norm: float | None`  
-  Norm of the gradient at the solution, when available.
-- `fn_evals: list[tuple[str, int]]`  
-  Evaluation counters keyed by function name.
-
-A typical access pattern:
-
-    outcome = acd.results
-
-    print("Converged:", outcome.converged, "-", outcome.status)
-    print("Objective value:", outcome.value)
-    print("Iterations:", outcome.iterations)
-    print("Gradient norm:", outcome.grad_norm)
-    print("Function evals:", outcome.fn_evals)
-
----
-
-### 3.6 Fitted parameters (`ACDFittedParams`)
-
-The `ACD.fitted_params` property returns an `ACDFittedParams` instance that
-wraps the Rust `ACDParams` struct. The bindings in `lib.rs` expose the
-following read-only properties:
-
-- `omega: float`  
-  Baseline level parameter.
-- `slack: float`  
-  Positive slack term used to enforce strict stationarity.
-- `alpha: list[float]`  
-  Vector of ARCH-type coefficients (size `p`).
-- `beta: list[float]`  
-  Vector of GARCH-type coefficients (size `q`).
-- `psi_lags: list[float]`  
-  Initialization lags for ψ_t used at the start of the sample.
-
-Example:
-
-    params = acd.fitted_params
-
-    print("omega:", params.omega)
-    print("slack:", params.slack)
-    print("alpha:", params.alpha)
-    print("beta:", params.beta)
-    print("psi_lags:", params.psi_lags)
-
-These values are guaranteed (by the Rust-side constructors) to satisfy the
-model invariants documented in `ACDParams` (positivity, stationarity, shape
-constraints).
+All invariants (positivity, stationarity, shape constraints) are enforced on the Rust side; Python sees only valid parameter configurations.
 
 ---
 
 ## 4. Escanciano–Lobato test (`rust_timeseries.statistical_tests`)
 
-The `statistical_tests` module currently exposes a single class,
-`EscancianoLobato`, which implements the **Escanciano–Lobato heteroskedasticity
-proxy test** from the Rust type `ELOutcome`.
+The `statistical_tests` module currently exposes a single class, `EscancianoLobato`, implementing the Escanciano–Lobato heteroskedasticity proxy test.
 
 ### 4.1 Constructing `EscancianoLobato`
 
-The constructor validates inputs, converts them into a contiguous `float64`
-slice, runs the test in Rust, and stores the result:
+```python
+import numpy as np
+from rust_timeseries.statistical_tests import EscancianoLobato
 
-    import numpy as np
-    from rust_timeseries.statistical_tests import EscancianoLobato
+residuals = np.asarray(residuals, dtype=float)
 
-    residuals = np.asarray(residuals, dtype=float)
+el = EscancianoLobato(
+    residuals,  # 1-D array-like of float64, no NaNs, length >= 1
+    q=2.4,      # positive float proxy order (optional)
+    d=None,     # positive integer max lag; default floor(n**0.2)
+)
+```
 
-    el = EscancianoLobato(
-        residuals,  # 1-D array-like of float64, no NaNs, length >= 1
-        q=2.4,      # positive float proxy order (optional)
-        d=None,     # positive integer max lag; default floor(n**0.2)
-    )
+Signature (from `statistical_tests.pyi`):
 
-Signature (from `statistical_tests.pyi` and `lib.rs`):
-
-    class EscancianoLobato:
-        def __init__(
-            self,
-            data,
-            q: float | None = 2.4,
-            d: int | None = None,
-        ) -> None: ...
+```python
+class EscancianoLobato:
+    def __init__(
+        self,
+        data,
+        q: float | None = 2.4,
+        d: int | None = None,
+    ) -> None: ...
+```
 
 Validation rules enforced in the bindings:
 
-- `data` must be non-empty and contain no NaNs,
-- `q` must be positive when provided,
+- `data` must be non-empty and contain no NaNs;
+- `q` must be positive when provided;
 - `d` must be positive when provided.
 
-If any of these fail, a `ValueError` is raised from the PyO3 binding.
+Invalid inputs raise a `ValueError` from the PyO3 binding.
 
 ### 4.2 Accessing test results
 
-`EscancianoLobato` wraps a Rust `ELOutcome` and exposes three read-only
-properties:
+`EscancianoLobato` wraps a Rust `ELOutcome` and exposes three read-only properties:
 
-- `statistic: float`  
-  The test statistic.
-- `pvalue: float`  
-  Asymptotic p-value under the null.
-- `p_tilde: int`  
-  Data-driven lag choice that maximizes the penalized statistic.
+- `statistic: float` – the test statistic;
+- `pvalue: float` – asymptotic p-value under the null;
+- `p_tilde: int` – data-driven lag choice that maximizes the penalized statistic.
 
 Example:
 
-    print("EL statistic:", el.statistic)
-    print("EL p-value:", el.pvalue)
-    print("Selected lag p~:", el.p_tilde)
+```python
+print("EL statistic:", el.statistic)
+print("EL p-value  :", el.pvalue)
+print("Selected lag p~:", el.p_tilde)
+```
 
 ---
 
 ## 5. Design notes
 
-- **Python-first**  
-  The core of the codebase lives in Rust, but the bindings are designed so
-  that quantitative researchers can stay in Python. Inputs are standard
-  array-like objects (`numpy.ndarray`, `pandas.Series`, Python lists), and
-  outputs are plain Python scalars and lists.
-
-- **Tight coupling to Rust invariants**  
-  The PyO3 layer performs only shape checks, basic validation, and error
-  mapping. All model invariants (positivity, stationarity, etc.) are enforced
-  in the Rust types (`ACDModel`, `ACDParams`, `ELOutcome`).
-
-- **Explicit error reporting**  
-  Whenever a Rust error is raised (for example via the `ACDError` type), it is
-  surfaced as a Python exception with a clear string message. Fitted-state-
-  dependent getters (`results`, `fitted_params`) fail loudly if you call them
-  before `fit`.
-
-- **Minimal, inspectable objects**  
-  The Python wrappers (`ACD`, `ACDOptimOutcome`, `ACDFittedParams`,
-  `EscancianoLobato`) are intentionally small and read-only. They are easy
-  to log, serialize, or convert to dictionaries for downstream analysis.
+- **Python-first.** The core lives in Rust, but the bindings are designed so that quantitative researchers can stay in Python. Inputs are standard array-like objects (`numpy.ndarray`, `pandas.Series`, lists); outputs are plain Python scalars and lists.
+- **Tight coupling to Rust invariants.** The PyO3 layer performs shape checks, basic validation, and error mapping. All model invariants (positivity, stationarity, etc.) are enforced in the Rust types (`ACDModel`, `ACDParams`, `ELOutcome`).
+- **Explicit error reporting.** Rust errors (through the `ACDError` type) are surfaced as Python exceptions with clear messages. Fitted-state-dependent getters (`results`, `fitted_params`) fail loudly if you call them before `fit`.
+- **Minimal, inspectable objects.** The Python wrappers (`ACD`, `ACDOptimOutcome`, `ACDFittedParams`, `EscancianoLobato`) are intentionally small and read-only. They are easy to log, serialize, or convert to dictionaries for downstream analysis.
 
 ---
 
 ## 6. Status and extension points
 
-The current Python API is intentionally narrow and corresponds exactly to the
-bindings implemented in `lib.rs` and documented in `duration_models.pyi` and
-`statistical_tests.pyi`. Natural extensions, to be added in Rust and then
-surfaced through the same pattern, include:
+The current Python API is intentionally narrow and corresponds exactly to the bindings implemented in `lib.rs` and documented in `duration_models.pyi` and `statistical_tests.pyi`.
 
-- additional duration families that reuse the same `ACD` interface,
+Natural extensions (planned to be added in Rust and then surfaced via the same binding pattern) include:
+
+- simulation module for the ACD family.
 - further goodness-of-fit and residual tests under `statistical_tests`,
-- higher-level helpers for multi-asset or panel duration data.
+- exposing of covariance estimation through python as a standalone module.
 
-When extending the library, keep the following principles:
+When extending the library, keep the following steps:
 
-- add functionality first in the Rust core,
-- expose it through a PyO3 wrapper (`#[pyclass]` or `#[pymethods]`),
-- update the `.pyi` stubs to match,
-- and only then document it here.
+1. Add functionality in the Rust core.
+2. Expose it through a PyO3 wrapper (`#[pyclass]` / `#[pymethods]`).
+3. Update the `.pyi` stubs to match.
+4. Update this README to document the new public surface.
 
-This keeps the README, the stubs, and the compiled extension **in sync**.
+This keeps the README, stubs, and compiled extension in sync.
+
+---
+
+## 7. License
+
+`rust_timeseries` is released under the MIT license. See `LICENSE` for details.
