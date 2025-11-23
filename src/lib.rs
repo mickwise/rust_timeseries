@@ -262,6 +262,27 @@ pub struct ACD {
 #[pymethods]
 impl ACD {
     #[new]
+    #[pyo3(
+        signature = (
+            data_length,
+            p = None,
+            q = None,
+            init = None,
+            init_fixed = None,
+            init_psi_lags = None,
+            init_durations_lags = None,
+            tol_grad = None,
+            tol_cost = None,
+            max_iter = None,
+            line_searcher = None,
+            lbfgs_mem = None,
+            psi_guards = None,
+        ),
+        text_signature = "(data_length, /, p=None, q=None, init=None, init_fixed=None, \
+                          init_psi_lags=None, init_durations_lags=None, tol_grad=None, \
+                          tol_cost=None, max_iter=None, line_searcher=None, \
+                          lbfgs_mem=None, psi_guards=None)"
+    )]
     pub fn eacd<'py>(
         py: Python<'py>, data_length: usize, p: Option<usize>, q: Option<usize>,
         init: Option<&str>, init_fixed: Option<f64>, init_psi_lags: Option<&Bound<'py, PyAny>>,
@@ -291,6 +312,27 @@ impl ACD {
     }
 
     #[staticmethod]
+    #[pyo3(
+        signature = (
+            data_length,
+            p = None,
+            q = None,
+            init = None,
+            init_fixed = None,
+            init_psi_lags = None,
+            init_durations_lags = None,
+            tol_grad = None,
+            tol_cost = None,
+            max_iter = None,
+            line_searcher = None,
+            lbfgs_mem = None,
+            psi_guards = None,
+        ),
+        text_signature = "(data_length, /, p=None, q=None, init=None, init_fixed=None, \
+                          init_psi_lags=None, init_durations_lags=None, tol_grad=None, \
+                          tol_cost=None, max_iter=None, line_searcher=None, \
+                          lbfgs_mem=None, psi_guards=None)"
+    )]
     pub fn wacd<'py>(
         py: Python<'py>, data_length: usize, p: Option<usize>, q: Option<usize>, k: f64,
         init: Option<&str>, init_fixed: Option<f64>, init_psi_lags: Option<&Bound<'py, PyAny>>,
@@ -320,6 +362,27 @@ impl ACD {
     }
 
     #[staticmethod]
+    #[pyo3(
+        signature = (
+            data_length,
+            p = None,
+            q = None,
+            init = None,
+            init_fixed = None,
+            init_psi_lags = None,
+            init_durations_lags = None,
+            tol_grad = None,
+            tol_cost = None,
+            max_iter = None,
+            line_searcher = None,
+            lbfgs_mem = None,
+            psi_guards = None,
+        ),
+        text_signature = "(data_length, /, p=None, q=None, init=None, init_fixed=None, \
+                          init_psi_lags=None, init_durations_lags=None, tol_grad=None, \
+                          tol_cost=None, max_iter=None, line_searcher=None, \
+                          lbfgs_mem=None, psi_guards=None)"
+    )]
     pub fn gacd<'py>(
         py: Python<'py>, data_length: usize, p: Option<usize>, q: Option<usize>, p_shape: f64,
         d_shape: f64, init: Option<&str>, init_fixed: Option<f64>,
