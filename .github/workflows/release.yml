@@ -39,7 +39,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cache/pip
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          # Avoid hashFiles() to prevent template-evaluation failures
+          key: ${{ runner.os }}-cargo-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Build wheels & sdist
         shell: bash
@@ -109,7 +112,6 @@ jobs:
           print("Release smoke test passed.")
           PY
 
-      # Publish to PyPI
       - name: Publish to PyPI
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
