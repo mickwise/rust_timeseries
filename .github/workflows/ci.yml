@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install numpy
-    
+
       - name: Smoke-test the Python API
         shell: bash
         run: |

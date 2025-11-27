@@ -121,7 +121,7 @@ jobs:
           assert np.all(np.diag(cov_hac_direct) >= 0.0), "negative variance in direct HAC cov"
 
           print("Release smoke test passed.")
-          PY  
+          PY
 
       - name: Publish to PyPI
         if: startsWith(github.ref, 'refs/tags/')

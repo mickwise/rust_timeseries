@@ -46,10 +46,10 @@ _ArrayLikeF64_2D = (
 def estimate_hac_covariance_matrix(
     data: _ArrayLikeF64_2D,
     *,
-    kernel: str = "bartlett",
+    kernel: str | None = None,
     bandwidth: int | None = None,
-    center: bool = False,
-    small_sample_correction: bool = True,
+    center: bool | None = None,
+    small_sample_correction: bool | None = None,
 ) -> npt.NDArray[np.float64]:
     """
     HAC covariance matrix of average scores.

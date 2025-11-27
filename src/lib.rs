@@ -689,6 +689,16 @@ impl ACDFittedParams {
 
 #[cfg(feature = "python-bindings")]
 #[pyfunction]
+#[pyo3(
+    signature = (
+        raw_data,
+        kernel = None,
+        bandwidth = None,
+        center = None,
+        small_sample_correction = None,
+    ),
+    text_signature = "(data, /, kernel='bartlett', bandwidth=None, center=False, small_sample_correction=True)"
+)]
 pub fn estimate_hac_covariance_matrix<'py>(
     py: Python<'py>, raw_data: &Bound<'py, PyAny>, kernel: Option<&str>, bandwidth: Option<usize>,
     center: Option<bool>, small_sample_correction: Option<bool>,
