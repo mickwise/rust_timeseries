@@ -47,69 +47,81 @@ jobs:
           python -m pip install --upgrade pip wheel setuptools maturin
           maturin build --release --sdist --out dist
 
-      - name: Smoke-test built wheel
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip numpy
-          python -m pip install dist/*.whl
-
-          mkdir -p /tmp/rust_ts_smoke
-          cd /tmp/rust_ts_smoke
-
-          python - << 'PY'
-          import numpy as np
-
-          import rust_timeseries
-          from rust_timeseries.statistical_tests import EscancianoLobato
-          from rust_timeseries.duration_models import ACD
-
-          print("rust_timeseries imported OK")
-          print("  __version__:", getattr(rust_timeseries, "__version__", "<no __version__>"))
-          print("  __file__   :", getattr(rust_timeseries, "__file__", "<no __file__>"))
-
-          rng = np.random.default_rng(12345)
-
-          # 1) Escanciano–Lobato
-          x = rng.normal(size=200, loc=0.0, scale=1.0).astype(np.float64)
-          test = EscancianoLobato(x)
-          assert np.isfinite(test.statistic), "EL statistic is not finite"
-          assert np.isfinite(test.pvalue), "EL p-value is not finite"
-          assert 0.0 <= test.pvalue <= 1.0, "EL p-value out of [0, 1]"
-          assert np.isfinite(test.p_tilde), "EL p_tilde is not finite"
-
-          # 2) ACD(1,1) smoke test
-          n = 200
-          durations = 1.0 + np.abs(
-              rng.normal(loc=1.0, scale=0.2, size=n)
-          ).astype(np.float64)
-          theta0 = np.zeros(3, dtype=np.float64)
-
-          model = ACD(data_length=n, p=1, q=1)
-          model.fit(durations, theta0)
-
-          psi_hat = model.forecast(durations, horizon=5)
-          assert np.isfinite(psi_hat), "forecast is not finite"
-          assert psi_hat > 0.0, "forecast must be positive"
-
-          cov_classical = np.asarray(
-              model.covariance_matrix(durations, robust=False),
-              dtype=np.float64,
-          )
-          cov_hac = np.asarray(
-              model.covariance_matrix(durations, robust=True),
-              dtype=np.float64,
-          )
-
-          expected_shape = (theta0.size, theta0.size)
-          assert cov_classical.shape == expected_shape, "classical cov wrong shape"
-          assert cov_hac.shape == expected_shape, "HAC cov wrong shape"
-          assert np.all(np.isfinite(cov_classical)), "non-finite in classical cov"
-          assert np.all(np.isfinite(cov_hac)), "non-finite in HAC cov"
-          assert np.all(np.diag(cov_classical) >= 0.0), "negative var in classical cov"
-          assert np.all(np.diag(cov_hac) >= 0.0), "negative var in HAC cov"
-
-          print("Release smoke test passed.")
-          PY
+          - name: Smoke-test built wheel
+          shell: bash
+          run: |
+            python -m pip install --upgrade pip numpy
+            python -m pip install dist/*.whl
+  
+            mkdir -p /tmp/rust_ts_smoke
+            cd /tmp/rust_ts_smoke
+  
+            python - << 'PY'
+            import numpy as np
+  
+            import rust_timeseries
+            from rust_timeseries.statistical_tests import EscancianoLobato
+            from rust_timeseries.duration_models import ACD
+            from rust_timeseries.hac_estimation import estimate_hac_covariance_matrix
+  
+            print("rust_timeseries imported OK")
+            print("  __version__:", getattr(rust_timeseries, "__version__", "<no __version__>"))
+            print("  __file__   :", getattr(rust_timeseries, "__file__", "<no __file__>"))
+  
+            rng = np.random.default_rng(12345)
+  
+            # 1) Escanciano–Lobato
+            x = rng.normal(size=200, loc=0.0, scale=1.0).astype(np.float64)
+            test = EscancianoLobato(x)
+            assert np.isfinite(test.statistic), "EL statistic is not finite"
+            assert np.isfinite(test.pvalue), "EL p-value is not finite"
+            assert 0.0 <= test.pvalue <= 1.0, "EL p-value out of [0, 1]"
+            assert np.isfinite(test.p_tilde), "EL p_tilde is not finite"
+  
+            # 2) ACD(1,1) covariance matrix (classical vs HAC)
+            n = 200
+            durations = 1.0 + np.abs(
+                rng.normal(loc=1.0, scale=0.2, size=n)
+            ).astype(np.float64)
+            theta0 = np.zeros(3, dtype=np.float64)
+  
+            model = ACD(data_length=n, p=1, q=1)
+            model.fit(durations, theta0)
+  
+            psi_hat = model.forecast(durations, horizon=5)
+            assert np.isfinite(psi_hat), "forecast is not finite"
+            assert psi_hat > 0.0, "forecast must be positive"
+  
+            cov_classical = np.asarray(
+                model.covariance_matrix(durations, robust=False),
+                dtype=np.float64,
+            )
+            cov_hac_model = np.asarray(
+                model.covariance_matrix(durations, robust=True),
+                dtype=np.float64,
+            )
+  
+            expected_shape = (theta0.size, theta0.size)
+            assert cov_classical.shape == expected_shape, "classical cov wrong shape"
+            assert cov_hac_model.shape == expected_shape, "HAC cov (via ACD) wrong shape"
+            assert np.all(np.isfinite(cov_classical)), "non-finite in classical cov"
+            assert np.all(np.isfinite(cov_hac_model)), "non-finite in HAC cov (via ACD)"
+            assert np.all(np.diag(cov_classical) >= 0.0), "negative var in classical cov"
+            assert np.all(np.diag(cov_hac_model) >= 0.0), "negative var in HAC cov (via ACD)"
+  
+            # 3) Direct HAC covariance estimation API
+            scores = rng.normal(size=(300, 4)).astype(np.float64)
+            cov_hac_direct = np.asarray(
+                estimate_hac_covariance_matrix(scores, kernel="bartlett"),
+                dtype=np.float64,
+            )
+  
+            assert cov_hac_direct.shape == (4, 4), "direct HAC cov wrong shape"
+            assert np.all(np.isfinite(cov_hac_direct)), "non-finite in direct HAC cov"
+            assert np.all(np.diag(cov_hac_direct) >= 0.0), "negative variance in direct HAC cov"
+  
+            print("Release smoke test passed.")
+            PY  
 
       - name: Publish to PyPI
         if: startsWith(github.ref, 'refs/tags/')

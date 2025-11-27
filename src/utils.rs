@@ -1,5 +1,5 @@
 #[cfg(feature = "python-bindings")]
-use ndarray::Array1;
+use ndarray::{Array1, Array2};
 
 #[cfg(feature = "python-bindings")]
 use std::str::FromStr;
@@ -29,6 +29,7 @@ use numpy::{
     IntoPyArray,    // Vec → PyArray
     PyArrayMethods, // .readonly()
     PyReadonlyArray1,
+    PyReadonlyArray2,
 };
 
 #[cfg(feature = "python-bindings")]
@@ -56,6 +57,54 @@ pub fn extract_f64_array<'py>(
         )
     })?;
     Ok(vec.into_pyarray(py).readonly())
+}
+
+#[cfg(feature = "python-bindings")]
+pub fn extract_f64_matrix<'py>(
+    _py: Python<'py>, raw_data: &Bound<'py, PyAny>,
+) -> PyResult<Array2<f64>> {
+    // Fast path: 2-D numpy array
+    if let Ok(arr_ro) = raw_data.extract::<PyReadonlyArray2<f64>>() {
+        let shape_attr = arr_ro.getattr("shape")?;
+        let shape: Vec<usize> = shape_attr.extract()?;
+        if shape.len() != 2 {
+            return Err(PyValueError::new_err("scores matrix must be a 2-D float64 array"));
+        }
+
+        let nrows = shape[0];
+        let ncols = shape[1];
+
+        let slice = arr_ro.as_slice().map_err(|_| {
+            PyValueError::new_err("scores matrix must be a C-contiguous 2-D numpy.ndarray[float64]")
+        })?;
+
+        let flat = slice.to_vec();
+        let array = Array2::from_shape_vec((nrows, ncols), flat)
+            .map_err(|_| PyValueError::new_err("failed to reshape scores into a 2-D array"))?;
+
+        return Ok(array);
+    }
+
+    // Fallback: sequence-of-sequences
+    let rows: Vec<Vec<f64>> = raw_data.extract().map_err(|_| {
+        PyValueError::new_err(
+            "expected a 2-D numpy.ndarray, pandas.DataFrame, or sequence of sequences of float64",
+        )
+    })?;
+
+    let nrows = rows.len();
+    let ncols = rows.first().map(|r| r.len()).unwrap_or(0);
+
+    if nrows == 0 || ncols == 0 {
+        return Err(PyValueError::new_err("scores matrix must be non-empty"));
+    }
+    if rows.iter().any(|r| r.len() != ncols) {
+        return Err(PyValueError::new_err("all rows in scores matrix must have the same length"));
+    }
+
+    let flat: Vec<f64> = rows.into_iter().flatten().collect();
+    Array2::from_shape_vec((nrows, ncols), flat)
+        .map_err(|_| PyValueError::new_err("failed to reshape scores into a 2-D array"))
 }
 
 #[cfg(feature = "python-bindings")]
@@ -95,8 +144,6 @@ fn extract_init<'py>(
     init_psi_lags: Option<&Bound<'py, PyAny>>, init_durations_lags: Option<&Bound<'py, PyAny>>,
     p: usize, q: usize,
 ) -> PyResult<Init> {
-    use crate::utils::extract_f64_array; // already defined in this module
-
     let init_str = init.unwrap_or("uncond_mean");
 
     let policy = match init_str {
@@ -224,4 +271,14 @@ pub fn extract_hac_options(
     let ssc_val = small_sample_correction.unwrap_or(true);
 
     Ok(HACOptions::new(bandwidth, kernel_type, center_val, ssc_val))
+}
+
+#[cfg(feature = "python-bindings")]
+pub fn convert_array2_to_2d_vec(array: Array2<f64>) -> Vec<Vec<f64>> {
+    let (nrows, _ncols) = array.dim();
+    let mut out = Vec::with_capacity(nrows);
+    for i in 0..nrows {
+        out.push(array.row(i).to_vec());
+    }
+    out
 }

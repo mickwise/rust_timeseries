@@ -76,9 +76,13 @@ use crate::{
         errors::ACDError,
         models::acd::ACDModel,
     },
+    inference::hac::calculate_avg_scores_cov,
     optimization::loglik_optimizer::traits::OptimOutcome,
     statistical_tests::escanciano_lobato::ELOutcome,
-    utils::{build_acd_model, extract_acd_data, extract_f64_array, extract_hac_options},
+    utils::{
+        build_acd_model, convert_array2_to_2d_vec, extract_acd_data, extract_f64_array,
+        extract_f64_matrix, extract_hac_options,
+    },
 };
 
 /// EscancianoLobato — Python-facing wrapper for the EL heteroskedasticity robust test.
@@ -486,16 +490,8 @@ impl ACD {
         } else {
             None
         };
-
         let cov = self.inner.covariance_matrix(&acd_data, hac_opts.as_ref())?;
-
-        // Convert Array2<f64> → Vec<Vec<f64>> (row-major)
-        let (nrows, _ncols) = cov.dim();
-        let mut out = Vec::with_capacity(nrows);
-        for i in 0..nrows {
-            out.push(cov.row(i).to_vec());
-        }
-        Ok(out)
+        Ok(convert_array2_to_2d_vec(cov))
     }
 
     #[getter]
@@ -681,6 +677,19 @@ impl ACDFittedParams {
     }
 }
 
+#[cfg(feature = "python-bindings")]
+#[pyfunction]
+pub fn estimate_hac_covariance_matrix<'py>(
+    py: Python<'py>, raw_data: &Bound<'py, PyAny>, kernel: Option<&str>, bandwidth: Option<usize>,
+    center: Option<bool>, small_sample_correction: Option<bool>,
+) -> PyResult<Vec<Vec<f64>>> {
+    let data = extract_f64_matrix(py, raw_data)?;
+    let hac_opts = extract_hac_options(kernel, bandwidth, center, small_sample_correction)?;
+
+    let cov = calculate_avg_scores_cov(&hac_opts, &data);
+    Ok(convert_array2_to_2d_vec(cov))
+}
+
 /// _rust_timeseries — PyO3 module initializer for the Python extension.
 ///
 /// Purpose
@@ -726,8 +735,10 @@ impl ACDFittedParams {
 fn _rust_timeseries<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
     let statistical_tests_mod = PyModule::new(_py, "statistical_tests")?;
     let duration_models_mod = PyModule::new(_py, "duration_models")?;
+    let hac_estimation_mod = PyModule::new(_py, "hac_estimation")?;
     statistical_tests(_py, m, &statistical_tests_mod)?;
     duration_models(_py, m, &duration_models_mod)?;
+    hac_estimation(_py, m, &hac_estimation_mod)?;
 
     // Manually add submodules into sys.modules to allow for dot notation.
     _py.import("sys")?
@@ -737,6 +748,9 @@ fn _rust_timeseries<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult
     _py.import("sys")?
         .getattr("modules")?
         .set_item("rust_timeseries.duration_models", duration_models_mod)?;
+    _py.import("sys")?
+        .getattr("modules")?
+        .set_item("rust_timeseries.hac_estimation", hac_estimation_mod)?;
     Ok(())
 }
 
@@ -756,6 +770,15 @@ fn duration_models<'py>(
     m.add_class::<ACD>()?;
     m.add_class::<ACDOptimOutcome>()?;
     m.add_class::<ACDFittedParams>()?;
+    rust_timeseries.add_submodule(m)?;
+    Ok(())
+}
+
+#[cfg(feature = "python-bindings")]
+fn hac_estimation<'py>(
+    _py: Python, rust_timeseries: &Bound<'py, PyModule>, m: &Bound<'py, PyModule>,
+) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(estimate_hac_covariance_matrix, m)?)?;
     rust_timeseries.add_submodule(m)?;
     Ok(())
 }
