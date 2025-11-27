@@ -292,7 +292,105 @@ print("Selected lag p~:", el.p_tilde)
 
 ---
 
-## 5. Design notes
+Here’s a copy-pasteable markdown chunk you can drop straight into the README to document the HAC API.
+
+---
+
+### Where to put it
+
+Put this **between** your current sections:
+
+* **After** `## 4. Escanciano–Lobato test (`rust_timeseries.statistical_tests`)`
+* **Before** `## 5. Design notes`
+
+…and then **renumber**:
+
+* `## 5. Design notes` → `## 6. Design notes`
+* `## 6. Status and extension points` → `## 7. Status and extension points`
+* `## 7. License` → `## 8. License`
+
+So the new section below becomes **`## 5. HAC covariance estimation (`rust_timeseries.hac_estimation`)`**.
+
+---
+
+## 5. HAC covariance estimation (`rust_timeseries.hac_estimation`)
+
+In addition to the ACD model’s built-in `covariance_matrix(…, robust=True)` method,
+`rust_timeseries` exposes a **standalone HAC covariance helper** for users who
+already have per-observation score vectors (or similar objects) and just want a
+Newey–West–style covariance of their *average* score.
+
+The public entry point is:
+
+```python
+from rust_timeseries.hac_estimation import estimate_hac_covariance_matrix
+```
+
+### 5.1 Minimal example
+
+```python
+import numpy as np
+from rust_timeseries.hac_estimation import estimate_hac_covariance_matrix
+
+rng = np.random.default_rng(12345)
+
+# Fake "scores": n observations, k parameters
+n, k = 500, 4
+scores = rng.normal(size=(n, k)).astype(np.float64)
+
+cov_hac = estimate_hac_covariance_matrix(
+    scores,
+    kernel="bartlett",            # or "iid", "parzen", "quadratic_spectral"
+    bandwidth=None,               # plug-in bandwidth if None
+    center=False,                 # optionally demean the columns
+    small_sample_correction=True, # Newey–West finite-sample scaling
+)
+
+print("HAC cov shape:", cov_hac.shape)   # (k, k)
+print("HAC cov diag :", np.diag(cov_hac))
+```
+
+**Input conventions**
+
+* `data`: array-like of shape `(n, k)` with `float64` entries.
+
+  * Rows = observation or time index.
+  * Columns = score components / parameters.
+  * Accepted types: `numpy.ndarray`, nested Python sequences, etc.
+* The function validates that the matrix is non-empty and rectangular; invalid
+  inputs raise `ValueError`.
+
+**Output**
+
+* Returns a NumPy array of shape `(k, k)` containing the HAC covariance matrix
+  of the **average** score vector:
+
+  [
+  \hat{\Sigma}*{\bar{s}} \approx \operatorname{Cov}\left(\frac{1}{n}
+  \sum*{t=1}^n s_t\right)
+  ]
+
+  This is the scale typically used inside sandwich-style variance formulas.
+
+### 5.2 Relationship to `ACD.covariance_matrix`
+
+For ACD models, you usually do **not** need to call
+`estimate_hac_covariance_matrix` directly:
+
+* `ACD.covariance_matrix(..., robust=False)`
+  returns a model-based covariance using the observed information matrix.
+
+* `ACD.covariance_matrix(..., robust=True, kernel=..., bandwidth=..., ...)`
+  uses the **same HAC machinery** under the hood, applied to ACD score vectors,
+  and then maps the result from unconstrained parameter space to the model-space
+  parameters ((\omega, \alpha, \beta)) via a delta method.
+
+The standalone `hac_estimation` module is intended for **“bring your own
+scores”** workflows where you want to plug HAC covariances into your own
+estimators or sandwich formulas outside the ACD context.
+
+
+## 6. Design notes
 
 - **Python-first.** The core lives in Rust, but the bindings are designed so that quantitative researchers can stay in Python. Inputs are standard array-like objects (`numpy.ndarray`, `pandas.Series`, lists); outputs are plain Python scalars and lists.
 - **Tight coupling to Rust invariants.** The PyO3 layer performs shape checks, basic validation, and error mapping. All model invariants (positivity, stationarity, etc.) are enforced in the Rust types (`ACDModel`, `ACDParams`, `ELOutcome`).
@@ -301,15 +399,14 @@ print("Selected lag p~:", el.p_tilde)
 
 ---
 
-## 6. Status and extension points
+## 7. Status and extension points
 
 The current Python API is intentionally narrow and corresponds exactly to the bindings implemented in `lib.rs` and documented in `duration_models.pyi` and `statistical_tests.pyi`.
 
 Natural extensions (planned to be added in Rust and then surfaced via the same binding pattern) include:
 
 - simulation module for the ACD family.
-- further goodness-of-fit and residual tests under `statistical_tests`,
-- exposing of covariance estimation through python as a standalone module.
+- further goodness-of-fit and residual tests under `statistical_tests`.
 
 When extending the library, keep the following steps:
 
@@ -322,6 +419,6 @@ This keeps the README, stubs, and compiled extension in sync.
 
 ---
 
-## 7. License
+## 8. License
 
 `rust_timeseries` is released under the MIT license. See `LICENSE` for details.
