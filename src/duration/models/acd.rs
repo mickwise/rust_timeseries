@@ -653,7 +653,7 @@ mod tests {
 
         let tols = Tolerances::new(Some(1e-6), None, Some(100))
             .expect("Tolerances::new should succeed with these arguments");
-        let mle_opts = MLEOptions::new(tols, LineSearcher::MoreThuente, Some(5))
+        let mle_opts = MLEOptions::new(tols, LineSearcher::MoreThuente, Some(5), false)
             .expect("MLEOptions::new should succeed with these arguments");
 
         let psi_guards =

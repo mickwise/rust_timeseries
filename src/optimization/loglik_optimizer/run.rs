@@ -222,7 +222,7 @@ where
 /// [`OptResult<()>`]
 ///   - `Ok(())` on success.
 ///   - `Err(OptError)` if evaluating the cost at `θ₀` fails.
-///   Gradient errors are ignored; only the cost must succeed.
+///   - Gradient errors are ignored; only the cost must succeed.
 ///
 /// Errors
 /// ------

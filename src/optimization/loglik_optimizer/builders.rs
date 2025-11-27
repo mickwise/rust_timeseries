@@ -308,7 +308,7 @@ mod tests {
         // Arrange
         let tols =
             Tolerances::new(Some(1e-6), Some(1e-8), Some(50)).expect("Tolerances should be valid");
-        let opts = MLEOptions::new(tols, LineSearcher::HagerZhang, None)
+        let opts = MLEOptions::new(tols, LineSearcher::HagerZhang, None, false)
             .expect("MLEOptions should be valid");
 
         // Act
@@ -338,7 +338,7 @@ mod tests {
     fn build_optimizer_hager_zhang_respects_explicit_memory() {
         // Arrange
         let tols = Tolerances::new(Some(1e-6), None, Some(25)).expect("Tolerances should be valid");
-        let opts = MLEOptions::new(tols, LineSearcher::HagerZhang, Some(11))
+        let opts = MLEOptions::new(tols, LineSearcher::HagerZhang, Some(11), false)
             .expect("MLEOptions should be valid");
 
         // Act
@@ -366,7 +366,7 @@ mod tests {
         // Arrange
         let tols =
             Tolerances::new(Some(1e-6), Some(1e-8), Some(50)).expect("Tolerances should be valid");
-        let opts = MLEOptions::new(tols, LineSearcher::MoreThuente, None)
+        let opts = MLEOptions::new(tols, LineSearcher::MoreThuente, None, false)
             .expect("MLEOptions should be valid");
 
         // Act
@@ -396,7 +396,7 @@ mod tests {
     fn build_optimizer_more_thuente_respects_explicit_memory() {
         // Arrange
         let tols = Tolerances::new(Some(1e-6), None, Some(30)).expect("Tolerances should be valid");
-        let opts = MLEOptions::new(tols, LineSearcher::MoreThuente, Some(9))
+        let opts = MLEOptions::new(tols, LineSearcher::MoreThuente, Some(9), false)
             .expect("MLEOptions should be valid");
 
         // Act
@@ -425,7 +425,7 @@ mod tests {
         let raw = LBFGS::new(HagerZhangLS::new(), DEFAULT_LBFGS_MEM);
         let tols =
             Tolerances::new(Some(1e-6), Some(1e-8), Some(100)).expect("Tolerances should be valid");
-        let opts = MLEOptions::new(tols, LineSearcher::HagerZhang, Some(DEFAULT_LBFGS_MEM))
+        let opts = MLEOptions::new(tols, LineSearcher::HagerZhang, Some(DEFAULT_LBFGS_MEM), false)
             .expect("MLEOptions should be valid");
 
         // Act
@@ -454,7 +454,7 @@ mod tests {
         // Arrange
         let raw = LBFGS::new(MoreThuenteLS::new(), DEFAULT_LBFGS_MEM);
         let tols = Tolerances::new(None, None, Some(50)).expect("Tolerances should be valid");
-        let opts = MLEOptions::new(tols, LineSearcher::MoreThuente, None)
+        let opts = MLEOptions::new(tols, LineSearcher::MoreThuente, None, false)
             .expect("MLEOptions should be valid");
 
         // Act

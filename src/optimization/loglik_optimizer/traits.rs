@@ -225,6 +225,8 @@ impl FromStr for LineSearcher {
 /// - `lbfgs_mem`: `Option<usize>`
 ///   Optional memory parameter forwarded to the L-BFGS implementation.
 ///   When `Some(m)`, `m` must be greater than zero.
+/// - `verbose`: `bool`
+///   When `true`, enables verbose output from the optimizer.
 ///
 /// Invariants
 /// ----------
@@ -248,6 +250,7 @@ pub struct MLEOptions {
     pub tols: Tolerances,
     pub line_searcher: LineSearcher,
     pub lbfgs_mem: Option<usize>,
+    pub verbose: bool,
 }
 
 impl MLEOptions {
@@ -304,7 +307,7 @@ impl MLEOptions {
     /// assert_eq!(opts.lbfgs_mem, Some(7));
     /// ```
     pub fn new(
-        tols: Tolerances, line_searcher: LineSearcher, lbfgs_mem: Option<usize>,
+        tols: Tolerances, line_searcher: LineSearcher, lbfgs_mem: Option<usize>, verbose: bool,
     ) -> OptResult<Self> {
         if let Some(m) = lbfgs_mem
             && m == 0
@@ -314,7 +317,7 @@ impl MLEOptions {
                 reason: "L-BFGS memory must be greater than zero.",
             });
         }
-        Ok(Self { tols, line_searcher, lbfgs_mem })
+        Ok(Self { tols, line_searcher, lbfgs_mem, verbose })
     }
 }
 
@@ -333,6 +336,7 @@ impl Default for MLEOptions {
     ///   - `tols = Tolerances::new(Some(1e-6), None, Some(300))`
     ///   - `line_searcher = LineSearcher::MoreThuente`
     ///   - `lbfgs_mem = None` (use solver default).
+    ///  - `verbose = false` (no verbose output).
     ///
     /// Errors
     /// ------
@@ -367,6 +371,7 @@ impl Default for MLEOptions {
                 .expect("hard-coded defaults are valid"),
             line_searcher: LineSearcher::MoreThuente,
             lbfgs_mem: None,
+            verbose: false,
         }
     }
 }
@@ -953,7 +958,7 @@ mod tests {
         let lbfgs_mem = Some(0);
 
         // Act
-        let result = MLEOptions::new(tols, line_searcher, lbfgs_mem);
+        let result = MLEOptions::new(tols, line_searcher, lbfgs_mem, false);
 
         // Assert
         let err = result.expect_err("lbfgs_mem = 0 should be rejected");
@@ -988,7 +993,7 @@ mod tests {
         let lbfgs_mem = Some(7);
 
         // Act
-        let result = MLEOptions::new(tols, line_searcher, lbfgs_mem);
+        let result = MLEOptions::new(tols, line_searcher, lbfgs_mem, false);
 
         // Assert
         let opts = result.expect("Valid MLEOptions should construct");

@@ -263,6 +263,7 @@ pub struct ACD {
 }
 
 #[cfg(feature = "python-bindings")]
+#[allow(clippy::too_many_arguments)]
 #[pymethods]
 impl ACD {
     #[new]
@@ -281,18 +282,19 @@ impl ACD {
             line_searcher = None,
             lbfgs_mem = None,
             psi_guards = None,
+            verbose = None,
         ),
         text_signature = "(data_length, /, p=None, q=None, init=None, init_fixed=None, \
                           init_psi_lags=None, init_durations_lags=None, tol_grad=None, \
                           tol_cost=None, max_iter=None, line_searcher=None, \
-                          lbfgs_mem=None, psi_guards=None)"
+                          lbfgs_mem=None, psi_guards=None, verbose=None)"
     )]
     pub fn eacd<'py>(
         py: Python<'py>, data_length: usize, p: Option<usize>, q: Option<usize>,
         init: Option<&str>, init_fixed: Option<f64>, init_psi_lags: Option<&Bound<'py, PyAny>>,
         init_durations_lags: Option<&Bound<'py, PyAny>>, tol_grad: Option<f64>,
         tol_cost: Option<f64>, max_iter: Option<usize>, line_searcher: Option<&str>,
-        lbfgs_mem: Option<usize>, psi_guards: Option<(f64, f64)>,
+        lbfgs_mem: Option<usize>, psi_guards: Option<(f64, f64)>, verbose: Option<bool>,
     ) -> PyResult<Self> {
         let innovation = ACDInnovation::exponential();
         let inner = build_acd_model(
@@ -311,11 +313,13 @@ impl ACD {
             line_searcher,
             lbfgs_mem,
             psi_guards,
+            verbose,
         )?;
         Ok(ACD { inner })
     }
 
     #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(
         signature = (
             data_length,
@@ -332,18 +336,19 @@ impl ACD {
             line_searcher = None,
             lbfgs_mem = None,
             psi_guards = None,
+            verbose = None,
         ),
         text_signature = "(data_length, k, /, p=None, q=None, init=None, init_fixed=None, \
                           init_psi_lags=None, init_durations_lags=None, tol_grad=None, \
                           tol_cost=None, max_iter=None, line_searcher=None, \
-                          lbfgs_mem=None, psi_guards=None)"
+                          lbfgs_mem=None, psi_guards=None, verbose=None)"
     )]
     pub fn wacd<'py>(
         py: Python<'py>, data_length: usize, k: f64, p: Option<usize>, q: Option<usize>,
         init: Option<&str>, init_fixed: Option<f64>, init_psi_lags: Option<&Bound<'py, PyAny>>,
         init_durations_lags: Option<&Bound<'py, PyAny>>, tol_grad: Option<f64>,
         tol_cost: Option<f64>, max_iter: Option<usize>, line_searcher: Option<&str>,
-        lbfgs_mem: Option<usize>, psi_guards: Option<(f64, f64)>,
+        lbfgs_mem: Option<usize>, psi_guards: Option<(f64, f64)>, verbose: Option<bool>,
     ) -> PyResult<Self> {
         let innovation = ACDInnovation::weibull(k)?;
         let inner = build_acd_model(
@@ -362,11 +367,13 @@ impl ACD {
             line_searcher,
             lbfgs_mem,
             psi_guards,
+            verbose,
         )?;
         Ok(ACD { inner })
     }
 
     #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(
         signature = (
             data_length,
@@ -384,11 +391,12 @@ impl ACD {
             line_searcher = None,
             lbfgs_mem = None,
             psi_guards = None,
+            verbose = None,
         ),
         text_signature = "(data_length, p_shape, d_shape, /, p=None, q=None, init=None, init_fixed=None, \
                           init_psi_lags=None, init_durations_lags=None, tol_grad=None, \
                           tol_cost=None, max_iter=None, line_searcher=None, \
-                          lbfgs_mem=None, psi_guards=None)"
+                          lbfgs_mem=None, psi_guards=None, verbose=None)"
     )]
     pub fn gacd<'py>(
         py: Python<'py>, data_length: usize, p_shape: f64, d_shape: f64, p: Option<usize>,
@@ -396,6 +404,7 @@ impl ACD {
         init_psi_lags: Option<&Bound<'py, PyAny>>, init_durations_lags: Option<&Bound<'py, PyAny>>,
         tol_grad: Option<f64>, tol_cost: Option<f64>, max_iter: Option<usize>,
         line_searcher: Option<&str>, lbfgs_mem: Option<usize>, psi_guards: Option<(f64, f64)>,
+        verbose: Option<bool>,
     ) -> PyResult<Self> {
         let innovation = ACDInnovation::generalized_gamma(p_shape, d_shape)?;
         let inner = build_acd_model(
@@ -414,6 +423,7 @@ impl ACD {
             line_searcher,
             lbfgs_mem,
             psi_guards,
+            verbose,
         )?;
         Ok(ACD { inner })
     }

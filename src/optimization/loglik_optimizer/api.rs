@@ -255,6 +255,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     // Purpose
     // -------
     // Verify that `maximize` with `LineSearcher::HagerZhang` converges on a
@@ -291,6 +292,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     // Purpose
     // -------
     // Verify that `maximize` with `LineSearcher::MoreThuente` also converges

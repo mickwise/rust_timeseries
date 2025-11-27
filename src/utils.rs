@@ -37,18 +37,17 @@ use numpy::{
 pub fn extract_f64_array<'py>(
     py: Python<'py>, raw_data: &Bound<'py, PyAny>,
 ) -> PyResult<PyReadonlyArray1<'py, f64>> {
-    if let Ok(arr_ro) = raw_data.extract::<PyReadonlyArray1<f64>>() {
-        if arr_ro.as_slice().is_ok() {
-            return Ok(arr_ro);
-        }
+    if let Ok(arr_ro) = raw_data.extract::<PyReadonlyArray1<f64>>()
+        && arr_ro.as_slice().is_ok()
+    {
+        return Ok(arr_ro);
     }
 
-    if let Ok(obj) = raw_data.call_method("to_numpy", (false,), None) {
-        if let Ok(series_ro) = obj.extract::<PyReadonlyArray1<f64>>() {
-            if series_ro.as_slice().is_ok() {
-                return Ok(series_ro);
-            }
-        }
+    if let Ok(obj) = raw_data.call_method("to_numpy", (false,), None)
+        && let Ok(series_ro) = obj.extract::<PyReadonlyArray1<f64>>()
+        && series_ro.as_slice().is_ok()
+    {
+        return Ok(series_ro);
     }
 
     let vec: Vec<f64> = raw_data.extract().map_err(|_| {
@@ -108,6 +107,7 @@ pub fn extract_f64_matrix<'py>(
 }
 
 #[cfg(feature = "python-bindings")]
+#[allow(clippy::too_many_arguments)]
 pub fn build_acd_model<'py>(
     py: Python<'py>, data_length: usize,
     innovation: crate::duration::core::innovations::ACDInnovation, p: Option<usize>,
@@ -115,6 +115,7 @@ pub fn build_acd_model<'py>(
     init_psi_lags: Option<&Bound<'py, PyAny>>, init_durations_lags: Option<&Bound<'py, PyAny>>,
     tol_grad: Option<f64>, tol_cost: Option<f64>, max_iter: Option<usize>,
     line_searcher: Option<&str>, lbfgs_mem: Option<usize>, psi_guards: Option<(f64, f64)>,
+    verbose: Option<bool>,
 ) -> PyResult<ACDModel> {
     let p_val = p.unwrap_or(0);
     let q_val = q.unwrap_or(0);
@@ -127,7 +128,8 @@ pub fn build_acd_model<'py>(
         extract_init(py, init, init_fixed, init_psi_lags, init_durations_lags, p_val, q_val)?;
 
     // Optimizer options.
-    let mle_opts = extract_mle_opts(tol_grad, tol_cost, max_iter, line_searcher, lbfgs_mem)?;
+    let mle_opts =
+        extract_mle_opts(tol_grad, tol_cost, max_iter, line_searcher, lbfgs_mem, verbose)?;
 
     // Psi guards with sensible default.
     let guards_tuple = psi_guards.unwrap_or((1e-6, 1e6));
@@ -198,13 +200,13 @@ fn extract_init<'py>(
 #[cfg(feature = "python-bindings")]
 fn extract_mle_opts(
     tol_grad: Option<f64>, tol_cost: Option<f64>, max_iter: Option<usize>,
-    line_searcher: Option<&str>, lbfgs_mem: Option<usize>,
+    line_searcher: Option<&str>, lbfgs_mem: Option<usize>, verbose: Option<bool>,
 ) -> PyResult<MLEOptions> {
-    if tol_grad == None
-        && tol_cost == None
-        && max_iter == None
-        && line_searcher == None
-        && lbfgs_mem == None
+    if tol_grad.is_none()
+        && tol_cost.is_none()
+        && max_iter.is_none()
+        && line_searcher.is_none()
+        && lbfgs_mem.is_none()
     {
         return Ok(MLEOptions::default());
     }
@@ -213,7 +215,8 @@ fn extract_mle_opts(
         Some(name) => LineSearcher::from_str(name)?,
         None => LineSearcher::MoreThuente,
     };
-    let opts = MLEOptions::new(tols, ls, lbfgs_mem)?;
+    let verbose = verbose.unwrap_or(false);
+    let opts = MLEOptions::new(tols, ls, lbfgs_mem, verbose)?;
     Ok(opts)
 }
 

@@ -534,7 +534,7 @@ mod tests {
     // - The backend error message is propagated into the `text` field.
     fn from_error_non_argmin_yields_backend_error() {
         // Arrange
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "boom");
+        let io_err = std::io::Error::other("boom");
         let backend: Error = io_err.into();
 
         // Act

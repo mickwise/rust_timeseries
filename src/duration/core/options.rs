@@ -492,11 +492,11 @@ mod tests {
         // Arrange
         let init = Init::uncond_mean();
         let tols = Tolerances::new(Some(1e-6), None, Some(100)).unwrap();
-        let mle_opts = MLEOptions::new(tols, LineSearcher::MoreThuente, Some(5)).unwrap();
+        let mle_opts = MLEOptions::new(tols, LineSearcher::MoreThuente, Some(5), false).unwrap();
         let psi_guards = PsiGuards::new((1e-6, 1e6)).unwrap();
 
         // Act
-        let opts = ACDOptions::new(init.clone(), mle_opts.clone(), psi_guards.clone());
+        let opts = ACDOptions::new(init.clone(), mle_opts.clone(), psi_guards);
 
         // Assert
         assert_eq!(opts.init, init);

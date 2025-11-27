@@ -123,7 +123,7 @@ fn default_acd_options() -> ACDOptions {
     let init = Init::uncond_mean();
     let tols = Tolerances::new(Some(1e-6), None, Some(200))
         .expect("Tolerances::new should accept positive tolerances");
-    let mle_opts = MLEOptions::new(tols, LineSearcher::MoreThuente, None)
+    let mle_opts = MLEOptions::new(tols, LineSearcher::MoreThuente, None, false)
         .expect("MLEOptions::new should succeed with reasonable tolerances");
     let psi_guards = PsiGuards::new((1e-6, 1e6))
         .expect("PsiGuards::new should accept positive, finite bounds (min < max)");
@@ -170,7 +170,7 @@ fn tuned_acd_options() -> ACDOptions {
     let init = Init::uncond_mean();
     let tols = Tolerances::new(Some(1e-8), Some(1e-6), Some(50))
         .expect("Tolerances::new should accept tighter tolerances");
-    let mle_opts = MLEOptions::new(tols, LineSearcher::MoreThuente, Some(5))
+    let mle_opts = MLEOptions::new(tols, LineSearcher::MoreThuente, Some(5), false)
         .expect("MLEOptions::new should succeed with explicit L-BFGS memory");
     let psi_guards =
         PsiGuards::new((1e-4, 1e3)).expect("PsiGuards::new should accept narrow yet valid bounds");
@@ -219,7 +219,7 @@ fn fit_acd_model(
 ) -> (ACDModel, ACDData, usize) {
     let data = make_trending_data(n, base, slope);
     let shape = ACDShape::new(p, q, n).expect("ACDShape::new should accept p, q < n and p + q > 0");
-    let mut model = ACDModel::new(shape.clone(), innovation, opts.clone(), n);
+    let mut model = ACDModel::new(shape, innovation, opts.clone(), n);
     let theta_dim = 1 + p + q;
     let theta0 = Array1::from_elem(theta_dim, 0.0);
     model.fit(theta0, &data).expect("ACDModel::fit should succeed on synthetic trending data");
@@ -350,7 +350,7 @@ fn hac_standard_errors_differ_from_classical_on_trending_series() {
     let shape = ACDShape::new(p, q, n).expect("ACDShape::new should accept p, q < n and p + q > 0");
     let opts = default_acd_options();
     let innovation = ACDInnovation::exponential();
-    let mut model = ACDModel::new(shape.clone(), innovation, opts, n);
+    let mut model = ACDModel::new(shape, innovation, opts, n);
     let theta_dim = 1 + p + q;
     let theta0 = Array1::from_elem(theta_dim, 0.0);
     model.fit(theta0, &data).expect("fit should succeed");
@@ -423,7 +423,7 @@ fn acd_api_respects_tuned_acdoptions() {
     let shape = ACDShape::new(p, q, n).expect("ACDShape::new should accept p, q < n and p + q > 0");
     let opts = tuned_acd_options();
     let innovation = ACDInnovation::weibull(1.3).expect("valid Weibull shape");
-    let mut model = ACDModel::new(shape.clone(), innovation, opts, n);
+    let mut model = ACDModel::new(shape, innovation, opts, n);
     let theta_dim = 1 + p + q;
     let theta0 = array![0.1, -0.05, 0.02];
     model.fit(theta0, &data).expect("fit should succeed with tuned options");
@@ -486,7 +486,7 @@ fn acd_model_handles_t0_offset() {
     let shape = ACDShape::new(p, q, n).expect("ACDShape::new should accept p, q < n and p + q > 0");
     let opts = default_acd_options();
     let innovation = ACDInnovation::exponential();
-    let mut model = ACDModel::new(shape.clone(), innovation, opts, n);
+    let mut model = ACDModel::new(shape, innovation, opts, n);
     let theta_dim = 1 + p + q;
     let theta0 = Array1::from_elem(theta_dim, 0.0);
     model.fit(theta0, &data).expect("fit should succeed with t0 > 0");
