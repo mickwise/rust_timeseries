@@ -20,7 +20,7 @@ This README documents only what is actually exposed through those bindings.
 
 ### 1.1 From PyPI (recommended)
 
-Version `1.0.0` is available on PyPI:
+Version `1.1.0` is available on PyPI:
 
 ```bash
 pip install rust_timeseries
